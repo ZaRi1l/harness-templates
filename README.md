@@ -11,10 +11,12 @@ Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를
 |---|---|---|---|---|---|
 | [`solo-guarded-dev`](solo-guarded-dev/) | 1인 세션 + Stop Hook | 1인 | 낮음 | 기본 | 대부분의 프로젝트, UI 비중이 큰 일 |
 | [`verified-parallel-dev`](verified-parallel-dev/) | manager + worktree implementer(최대 3) + verifier | 병렬 | 중간 | 높음 | 경로가 나뉜 큰 작업, 변환기·마이그레이션 |
+| [`continuous-parallel-dev`](continuous-parallel-dev/) | verified-parallel-dev + 작업 대기열 + 검증 게이트 자동 통합 | 병렬, 지속 | 높음 | 높음 | 기능을 계속 쌓아 가는 장기 개발 |
 | [`team-shared-dev`](team-shared-dev/) | Agent Teams, 작업 폴더 공유, 작업 Hook | 팀 3~5 | 높음 | 중간 | 파일 경계가 뚜렷한 새 기능 |
 | [`team-hybrid-dev`](team-hybrid-dev/) | 조사·검증은 팀원, 구현은 worktree | 팀 + 병렬 | 가장 높음 | 가장 높음 | 조사가 먼저 필요하고 틀리면 안 되는 큰 작업 |
 
 고르는 법: 먼저 `solo-guarded-dev`로 시작하고, 작업을 독립 경로로 나눌 수 있을 때 `verified-parallel-dev`로 올린다.
+작업이 계속 이어지고 검증된 것부터 쌓아 가고 싶으면 `continuous-parallel-dev`를 쓴다(`main` 반영은 여전히 사람이 한다).
 팀 템플릿 두 개는 Claude Code의 **실험 기능**(Agent Teams)에 의존한다.
 
 ## 공통 적용 방법
@@ -27,7 +29,7 @@ Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를
 `verify.config.json`의 키 설명과 pytest·Node·Gradle 예시는 [`verified-parallel-dev/README.md`](verified-parallel-dev/README.md)에 있다.
 
 ## 개발
-네 템플릿의 `verify.py`는 같은 파일이다. 고치면 모두 같이 고친다(테스트가 같은지 검사한다).
+모든 템플릿의 `verify.py`는 같은 파일이다. 고치면 모두 같이 고친다(테스트가 같은지 검사한다).
 
 Hook 자체의 테스트: `python -m unittest discover -s tests` (표준 라이브러리만, git 필요).
 임시 git 저장소를 만들어 PASS / SKIP / FAIL / BLOCKED, 캐시, worktree, 작업 Hook을 실제 Hook처럼 실행한다.
