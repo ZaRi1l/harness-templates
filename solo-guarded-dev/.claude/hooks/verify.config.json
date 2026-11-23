@@ -1,7 +1,7 @@
 {
     "_comment": "프로젝트에 맞게 고친다. 각 키의 설명과 다른 언어 예시는 README.md의 'verify.config.json' 절을 본다.",
     "test_command": ["{python}", "-m", "unittest"],
-    "test_env": {},
+    "test_env": {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": ".no-pycache"},
     "python_candidates": [".venv/Scripts/python.exe", ".venv/bin/python"],
     "relevant_prefixes": ["src/", "tests/"],
     "relevant_suffixes": [".py"],

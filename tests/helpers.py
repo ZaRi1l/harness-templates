@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ["solo-guarded-dev", "verified-parallel-dev", "team-shared-dev", "team-hybrid-dev"]
 
 GOOD = "def add(a, b):\n    return a + b\n"
-BAD = "def add(a, b):\n    return a - b\n"
+# GOOD과 크기가 달라야 한다. 크기·수정 시각(초)이 같으면 Python이 이전 .pyc를 재사용해 깨진 코드로도 통과할 수 있다.
+BAD = "def add(a, b):\n    return a - b - 0\n"
 SAMPLE_TEST = (
     "import sys, unittest\n"
     "sys.path.insert(0, 'src')\n"

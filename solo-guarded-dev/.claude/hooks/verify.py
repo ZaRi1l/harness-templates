@@ -239,11 +239,21 @@ def uncommitted_changes(root: Path) -> list[tuple[str, str]]:
         if len(item) < 4:
             continue
         status, path = item[:2], item[3:]
-        if status[0] in "RC":  # rename/copy: the next field is the source path
+        if status[0] in "RC":  # rename/copy: the next field is the source path; moving a file out counts too
+            source = items[i] if i < len(items) else ""
             i += 1
+            if is_relevant(source) and not is_relevant(path):
+                path = source
         if is_relevant(path):
             entries.append((status, path))
     return entries
+
+
+def changed_paths(root: Path, rev_range: str) -> list[str]:
+    """Relevant paths changed in rev_range. -z keeps non-ASCII paths unquoted; --no-renames lists both
+    sides of a rename so a file moved out of a relevant path is still seen."""
+    out = git(root, "diff", "--name-only", "-z", "--no-renames", rev_range, check=False)
+    return [p for p in out.split("\0") if p and is_relevant(p)]
 
 
 def committed_changes(root: Path, last_pass_head: str | None = None) -> tuple[str | None, list[str]]:
@@ -252,16 +262,14 @@ def committed_changes(root: Path, last_pass_head: str | None = None) -> tuple[st
         if git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False).strip():
             base = git(root, "merge-base", ref, "HEAD", check=False).strip()
             if base:
-                out = git(root, "diff", "--name-only", f"{base}..HEAD", check=False)
-                changed = [p for p in out.splitlines() if is_relevant(p)]
+                changed = changed_paths(root, f"{base}..HEAD")
                 break
             base = None
     # Work committed on the base branch itself (merge-base == HEAD) is invisible above: also count
     # everything committed since the last full PASS. A vanished commit (rebase, gc) is ignored.
     if last_pass_head and last_pass_head != git(root, "rev-parse", "HEAD").strip():
         if git(root, "rev-parse", "--verify", "--quiet", f"{last_pass_head}^{{commit}}", check=False).strip():
-            out = git(root, "diff", "--name-only", f"{last_pass_head}..HEAD", check=False)
-            changed += [p for p in out.splitlines() if is_relevant(p) and p not in changed]
+            changed += [p for p in changed_paths(root, f"{last_pass_head}..HEAD") if p not in changed]
     return base, changed
 
 

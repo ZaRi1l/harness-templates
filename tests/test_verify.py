@@ -111,6 +111,40 @@ class TestVerify(RepoTestCase):
         self.repo.git("gc", "-q", "--prune=now")
         self.assertStatus(self.repo.hook("verify.py", "Stop"), "SKIP", 0)
 
+    def test_same_size_same_mtime_edit_is_not_hidden_by_stale_pyc(self):
+        # 회귀: 크기·수정 시각이 같은 편집은 이전 .pyc가 재사용되어 깨진 코드로도 PASS가 났다
+        import os
+        same_size_bad = GOOD.replace("a + b", "a - b")
+        self.assertEqual(len(same_size_bad), len(GOOD))
+        path = self.repo.path / "src/m.py"
+        self.repo.write("src/m.py", GOOD + "# x\n")
+        self.assertStatus(self.repo.verify(), "PASS", 0)
+        st = path.stat()
+        self.repo.write("src/m.py", same_size_bad + "# x\n")
+        os.utime(path, (st.st_atime, st.st_mtime))
+        self.assertStatus(self.repo.verify(), "FAIL", 2)
+
+    def test_non_ascii_path_committed_on_branch_is_tested(self):
+        # 회귀: git이 한글 경로를 "src/\355..." 로 감싸 출력해 관련 변경으로 인식하지 못했다
+        self.repo.git("switch", "-qc", "feat")
+        self.repo.write("src/한글.py", "X = 1\n")
+        self.repo.git("add", "-A")
+        self.repo.git("commit", "-qm", "korean")
+        r = self.assertStatus(self.repo.verify(), "PASS", 0)
+        self.assertEqual(r["committed_changes"], ["src/한글.py"])
+
+    def test_moving_file_out_of_relevant_path_is_tested(self):
+        # 회귀: 이름 변경은 새 경로만 보여 src/에서 빠져나간 파일을 놓쳤다
+        self.repo.write("src/extra.py", "X = 1\n")
+        self.repo.git("add", "-A")
+        self.repo.git("commit", "-qm", "extra")
+        self.repo.git("switch", "-qc", "feat")
+        (self.repo.path / "docs").mkdir()
+        self.repo.git("mv", "src/extra.py", "docs/extra.txt")
+        self.assertIn("src/extra.py", self.assertStatus(self.repo.verify(), "PASS", 0)["uncommitted_changes"])
+        self.repo.git("commit", "-qm", "move")
+        self.assertIn("src/extra.py", self.assertStatus(self.repo.verify("--force"), "PASS", 0)["committed_changes"])
+
     def test_subagent_in_main_checkout_warns(self):
         self.repo.write("src/m.py", GOOD + "# changed\n")
         proc = self.repo.hook("verify.py", "SubagentStop", agent_type="implementer")
