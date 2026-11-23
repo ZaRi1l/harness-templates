@@ -246,14 +246,23 @@ def uncommitted_changes(root: Path) -> list[tuple[str, str]]:
     return entries
 
 
-def committed_changes(root: Path) -> tuple[str | None, list[str]]:
+def committed_changes(root: Path, last_pass_head: str | None = None) -> tuple[str | None, list[str]]:
+    base, changed = None, []
     for ref in filter(None, [os.environ.get("VERIFY_BASE_REF"), *CFG["base_refs"]]):
         if git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False).strip():
             base = git(root, "merge-base", ref, "HEAD", check=False).strip()
             if base:
                 out = git(root, "diff", "--name-only", f"{base}..HEAD", check=False)
-                return base, [p for p in out.splitlines() if is_relevant(p)]
-    return None, []
+                changed = [p for p in out.splitlines() if is_relevant(p)]
+                break
+            base = None
+    # Work committed on the base branch itself (merge-base == HEAD) is invisible above: also count
+    # everything committed since the last full PASS. A vanished commit (rebase, gc) is ignored.
+    if last_pass_head and last_pass_head != git(root, "rev-parse", "HEAD").strip():
+        if git(root, "rev-parse", "--verify", "--quiet", f"{last_pass_head}^{{commit}}", check=False).strip():
+            out = git(root, "diff", "--name-only", f"{last_pass_head}..HEAD", check=False)
+            changed += [p for p in out.splitlines() if is_relevant(p) and p not in changed]
+    return base, changed
 
 
 def fingerprint(root: Path, head: str, dirty: list[tuple[str, str]], python: str) -> str:
@@ -276,9 +285,13 @@ def load_state() -> dict:
         return {}
 
 
-def save_state(result: str, fp: str, detail: str) -> None:
+def save_state(result: str, fp: str, detail: str, head: str | None = None) -> None:
     payload = {"result": result, "fingerprint": fp, "time": now_iso(), "detail": detail,
                "command": REPORT.get("command")}
+    # last full PASS commit: set on PASS, carried over unchanged on FAIL (never lost)
+    last_pass_head = head if result == "PASS" else load_state().get("last_pass_head")
+    if last_pass_head:
+        payload["last_pass_head"] = last_pass_head
     try:
         PATHS["state"].write_text(json.dumps(payload), encoding="utf-8")
     except OSError as e:
@@ -393,13 +406,13 @@ def main() -> int:
         REPORT["warnings"].append(msg)
         log(f"WARNING: {msg}")
 
+    state = load_state()
     dirty = uncommitted_changes(root)
-    base, committed = committed_changes(root)
+    base, committed = committed_changes(root, state.get("last_pass_head"))
     python = pick_python(common_dir.parent)
     fp = fingerprint(root, head, dirty, python)
     REPORT.update(base_commit=base, uncommitted_changes=[p for _, p in dirty],
                   committed_changes=committed, python=python, fingerprint=fp)
-    state = load_state()
 
     if not args.only and not args.force:
         if not dirty and not committed:
@@ -467,7 +480,7 @@ def main() -> int:
     pattern_ok = not pattern or re.search(pattern, output, re.M) is not None
     if proc.returncode == 0 and pattern_ok:
         if not args.only:
-            save_state("PASS", fp, f"{scope}, {elapsed}, head {head[:10]}")
+            save_state("PASS", fp, f"{scope}, {elapsed}, head {head[:10]}", head)
         return finish("PASS", 0, f"{scope} in {elapsed}; exit 0\n{report}")
 
     detail = f"{scope} in {elapsed}, exit {proc.returncode}, target {root} (branch {branch})\n{report}\nFull log: {PATHS['log']}"

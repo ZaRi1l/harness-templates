@@ -74,6 +74,43 @@ class TestVerify(RepoTestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("BLOCKED", stderr(proc))
 
+    def commit(self, text: str, message: str) -> None:
+        self.repo.write("src/m.py", text)
+        self.repo.git("commit", "-qam", message)
+
+    def state(self) -> dict:
+        import json
+        from pathlib import Path
+        path = self.repo.git("rev-parse", "--path-format=absolute", "--git-path", "claude-verify-state.json")
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+
+    def test_commit_on_main_after_pass_is_tested(self):
+        # 회귀: main에서 직접 일하고 응답 전에 커밋하면 Stop Hook이 항상 "관련 변경 없음" SKIP이었다
+        self.assertStatus(self.repo.verify("--force"), "PASS", 0)
+        self.assertEqual(self.state()["last_pass_head"], self.repo.git("rev-parse", "HEAD"))
+        self.assertStatus(self.repo.hook("verify.py", "Stop"), "SKIP", 0)
+        self.commit(GOOD + "# changed\n", "change")
+        r = self.assertStatus(self.repo.hook("verify.py", "Stop"), "PASS", 0)
+        self.assertEqual((r["committed_changes"], r["scope"]), (["src/m.py"], "full"))
+
+    def test_failing_commit_on_main_fails_and_keeps_last_pass(self):
+        self.assertStatus(self.repo.verify("--force"), "PASS", 0)
+        good_head = self.repo.git("rev-parse", "HEAD")
+        self.commit(BAD, "broken")
+        self.assertStatus(self.repo.hook("verify.py", "Stop"), "FAIL", 2)
+        self.assertEqual(self.state()["last_pass_head"], good_head)
+        self.commit(GOOD + "# fixed\n", "fix")
+        self.assertStatus(self.repo.hook("verify.py", "Stop"), "PASS", 0)
+        self.assertEqual(self.state()["last_pass_head"], self.repo.git("rev-parse", "HEAD"))
+
+    def test_vanished_last_pass_head_is_ignored(self):
+        self.commit(GOOD + "# temp\n", "temp")
+        self.assertStatus(self.repo.verify("--force"), "PASS", 0)
+        self.repo.git("reset", "-q", "--hard", "HEAD~1")
+        self.repo.git("reflog", "expire", "--expire=now", "--all")
+        self.repo.git("gc", "-q", "--prune=now")
+        self.assertStatus(self.repo.hook("verify.py", "Stop"), "SKIP", 0)
+
     def test_subagent_in_main_checkout_warns(self):
         self.repo.write("src/m.py", GOOD + "# changed\n")
         proc = self.repo.hook("verify.py", "SubagentStop", agent_type="implementer")
