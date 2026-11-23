@@ -1,0 +1,76 @@
+{
+    "$schema": "https://json.schemastore.org/claude-code-settings.json",
+    "env": {
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0"
+    },
+    "worktree": {
+        "baseRef": "head"
+    },
+    "permissions": {
+        "deny": [
+            "Read(**/.env)",
+            "Read(**/.env.*)",
+            "Read(**/*.pem)",
+            "Read(**/*.key)",
+            "Bash(git push)",
+            "Bash(git push *)",
+            "PowerShell(git push)",
+            "PowerShell(git push *)",
+            "Bash(gh pr create *)",
+            "Bash(gh pr merge *)",
+            "PowerShell(gh pr create *)",
+            "PowerShell(gh pr merge *)"
+        ],
+        "ask": [
+            "Bash(git merge *)",
+            "Bash(git rebase *)",
+            "Bash(git branch -D *)",
+            "Bash(git worktree remove *)",
+            "Bash(git remote *)",
+            "PowerShell(git merge *)",
+            "PowerShell(git rebase *)",
+            "PowerShell(git branch -D *)",
+            "PowerShell(git worktree remove *)",
+            "PowerShell(git remote *)"
+        ]
+    },
+    "hooks": {
+        "Stop": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "uv",
+                        "args": [
+                            "run",
+                            "--no-project",
+                            "--offline",
+                            "python",
+                            "${CLAUDE_PROJECT_DIR}/.claude/hooks/verify.py"
+                        ],
+                        "timeout": 300
+                    }
+                ]
+            }
+        ],
+        "SubagentStop": [
+            {
+                "matcher": "implementer",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "uv",
+                        "args": [
+                            "run",
+                            "--no-project",
+                            "--offline",
+                            "python",
+                            "${CLAUDE_PROJECT_DIR}/.claude/hooks/verify.py"
+                        ],
+                        "timeout": 300
+                    }
+                ]
+            }
+        ]
+    }
+}

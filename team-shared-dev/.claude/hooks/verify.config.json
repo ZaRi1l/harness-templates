@@ -1,0 +1,19 @@
+{
+    "_comment": "프로젝트에 맞게 고친다. 각 키의 설명과 다른 언어 예시는 README.md의 'verify.config.json' 절을 본다.",
+    "test_command": ["{python}", "-m", "unittest"],
+    "test_env": {},
+    "python_candidates": [".venv/Scripts/python.exe", ".venv/bin/python"],
+    "relevant_prefixes": ["src/", "tests/"],
+    "relevant_suffixes": [".py"],
+    "relevant_files": ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"],
+    "ignored_prefixes": [".claude/", "docs/"],
+    "ignored_suffixes": [".md", ".pyc"],
+    "base_refs": ["main", "master", "origin/HEAD"],
+    "timeout_s": 240,
+    "success_pattern": "^OK\\b",
+    "blocked_patterns": [
+        "^ModuleNotFoundError: No module named",
+        "^(?:\\w+\\.)*MemoryError\\b"
+    ],
+    "preflight": []
+}
