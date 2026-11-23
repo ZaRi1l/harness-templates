@@ -3,7 +3,9 @@
 
 TaskCreated   작업 설명에 '담당 파일:'과 '완료 기준:' 줄이 없거나, 담당 파일이 아직 열린 다른 작업과
               겹치면 생성을 거부한다(exit 2). 통과하면 담당 파일을 잠근다.
-TaskCompleted verify.py를 돌려 PASS/SKIP이 아니면 완료를 막는다(exit 2). 통과하면 잠금을 푼다.
+TaskCompleted verify.py를 돌려 통과하지 않으면 완료를 막는다(exit 2). 담당 파일이 있는 작업은
+              전체 테스트 PASS(또는 같은 트리의 캐시된 PASS)만 인정한다. "관련 변경 없음" SKIP이면
+              캐시를 무시하고 테스트를 다시 돌린다. 통과하면 잠금을 푼다.
 
 잠금 파일: <git dir>/claude-task-locks.json
 """
@@ -49,9 +51,13 @@ def overlaps(a: str, b: str) -> bool:
     return not a or not b or a == b or a.startswith(b + "/") or b.startswith(a + "/")
 
 
-def lock_path(cwd: str) -> Path:
-    root = Path(verify.git(Path(cwd), "rev-parse", "--show-toplevel").strip())
-    return verify.git_path(root, "claude-task-locks.json")
+def run_verify(*args: str, stdin: str | None = None) -> int:
+    return subprocess.run([sys.executable, str(verify.__file__), *args], input=stdin,
+                          text=True, encoding="utf-8").returncode
+
+
+def last_report(root: Path) -> dict:
+    return load(verify.git_path(root, verify.REPORT_NAME))
 
 
 def load(path: Path) -> dict:
@@ -83,12 +89,23 @@ def on_created(hook: dict, path: Path) -> None:
     path.write_text(json.dumps(locks, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def on_completed(raw: str, hook: dict, path: Path) -> None:
-    res = subprocess.run([sys.executable, str(verify.__file__)], input=raw, text=True, encoding="utf-8")
-    if res.returncode != 0:
-        block(f"verify.py가 통과하지 않아 작업 '{hook.get('task_subject', '')}'을 완료할 수 없다. "
+def on_completed(raw: str, hook: dict, root: Path, path: Path) -> None:
+    subject = hook.get("task_subject", "")
+    failed = (f"verify.py가 통과하지 않아 작업 '{subject}'을 완료할 수 없다. "
               "위 보고를 보고 고친다. 다른 작업 때문에 실패했다면 lead에게 알린다.")
     locks = load(path)
+    owns_files = hook.get("task_id", "?") in locks
+    if run_verify(stdin=raw) != 0:
+        block(failed)
+    report = last_report(root)
+    if owns_files and report.get("scope") != "full":
+        # "관련 변경 없음" SKIP은 테스트를 돌리지 않은 결과다. 담당 파일이 있는 작업은 실제로 돌려 확인한다.
+        if run_verify("--target", str(root), "--force") != 0:
+            block(failed)
+        report = last_report(root)
+        if report.get("status") != "PASS" or report.get("scope") != "full":
+            block(f"작업 '{subject}'의 검증 결과가 전체 테스트 통과가 아니다 "
+                  f"(status={report.get('status')}, scope={report.get('scope')}).")
     if locks.pop(hook.get("task_id", "?"), None) is not None:
         path.write_text(json.dumps(locks, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -96,12 +113,13 @@ def on_completed(raw: str, hook: dict, path: Path) -> None:
 def main() -> None:
     raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")  # Hook 입력은 UTF-8 (Windows 기본 cp949 아님)
     hook = json.loads(raw) if raw.strip() else {}
-    path = lock_path(hook.get("cwd") or ".")
+    root = Path(verify.git(Path(hook.get("cwd") or "."), "rev-parse", "--show-toplevel").strip())
+    path = verify.git_path(root, "claude-task-locks.json")
     event = hook.get("hook_event_name")
     if event == "TaskCreated":
         on_created(hook, path)
     elif event == "TaskCompleted":
-        on_completed(raw, hook, path)
+        on_completed(raw, hook, root, path)
 
 
 if __name__ == "__main__":
