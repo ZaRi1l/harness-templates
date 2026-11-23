@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,14 @@ class Repo:
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
+def rmtree(path: Path) -> None:
+    """git이 만든 읽기 전용 파일도 지운다(Windows). Python 3.8에는 ignore_cleanup_errors가 없다."""
+    def force(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+    shutil.rmtree(path, onerror=force)
+
+
 def stderr(proc: subprocess.CompletedProcess) -> str:
     return proc.stderr.decode("utf-8")
 
@@ -87,9 +96,8 @@ class RepoTestCase(unittest.TestCase):
     template = "verified-parallel-dev"
 
     def setUp(self):
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
-        self.addCleanup(tmp.cleanup)
-        self.tmp = Path(tmp.name)
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(rmtree, self.tmp)
         self.repo = Repo(self.tmp, self.template)
 
     def assertStatus(self, proc, status: str, code: int, cwd: Path | None = None) -> dict:

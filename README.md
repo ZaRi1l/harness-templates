@@ -29,9 +29,9 @@ Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를
 ## 개발
 네 템플릿의 `verify.py`는 같은 파일이다. 고치면 모두 같이 고친다(테스트가 같은지 검사한다).
 
-Hook 자체의 테스트: `python -m unittest discover -s tests` (표준 라이브러리만, Python 3.10+, git 필요).
+Hook 자체의 테스트: `python -m unittest discover -s tests` (표준 라이브러리만, git 필요).
 임시 git 저장소를 만들어 PASS / SKIP / FAIL / BLOCKED, 캐시, worktree, 작업 Hook을 실제 Hook처럼 실행한다.
-GitHub Actions가 push마다 Windows와 Linux에서 돌린다.
+GitHub Actions가 push마다 Windows·Linux × Python 3.8·3.12에서 돌린다.
 
 ## 한계
 - 권한 규칙은 실수 방지용이다. `Bash(git push *)`는 `git -C 경로 push`를 못 막고, `Read(**/.env)`는 Bash의 `cat .env`를 못 막는다.
