@@ -2,7 +2,8 @@
 
 Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를 기본으로 갖는다.
 
-- **안전장치**: `git push`·PR 생성 거부, merge·rebase·브랜치 삭제는 승인 필요, `.env`·키 파일 읽기 거부
+- **안전장치**: `git push`·PR 생성 거부(push는 사람이 한다), `.env`·키 파일 읽기 거부.
+  merge·rebase·브랜치 삭제는 자동 루프를 위해 승인 없이 허용한다.
 - **검증 게이트**: `verify.py` Hook이 관련 파일이 바뀌었을 때 테스트를 돌려 PASS / SKIP / FAIL / BLOCKED로 판정한다.
   FAIL·BLOCKED면 Claude가 멈추지 않고 고치거나 보고한다. 테스트 명령은 `verify.config.json`에서 정한다.
 
@@ -38,6 +39,8 @@ GitHub Actions가 push마다 Windows·Linux × Python 3.8·3.12에서 돌린다.
 ## 한계
 - 권한 규칙은 실수 방지용이다. `Bash(git push *)`는 `git -C 경로 push`를 못 막고, `Read(**/.env)`는 Bash의 `cat .env`를 못 막는다.
   강한 격리가 필요하면 샌드박스나 OS 권한을 함께 쓴다.
+- merge·rebase·`reset --hard`·`branch -D`는 막지 않는다. 잘못된 병합·삭제를 막는 것은 에이전트 지침뿐이다.
+  한 세션만 다시 묻게 하려면 `claude --settings '{"permissions":{"ask":["Bash(git rebase *)"]}}'`처럼 실행한다.
 - 테스트 결과 캐시는 코드와 설정만 본다. 의존성을 바꿨으면 `--force`로 다시 돌린다.
 - Python은 파일 크기와 수정 시각(초 단위)이 같으면 이전 `.pyc`를 재사용한다. 그래서 1초 안에 같은 크기로 고친 코드가
   옛 코드로 테스트될 수 있다. 기본 `test_env`의 `PYTHONDONTWRITEBYTECODE`·`PYTHONPYCACHEPREFIX`가 이를 막는다. 지우지 않는다.

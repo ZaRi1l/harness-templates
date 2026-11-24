@@ -5,6 +5,18 @@
         "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"
     },
     "permissions": {
+        "allow": [
+            "Bash(git merge *)",
+            "Bash(git rebase *)",
+            "Bash(git reset --hard *)",
+            "Bash(git branch -D *)",
+            "Bash(git remote *)",
+            "PowerShell(git merge *)",
+            "PowerShell(git rebase *)",
+            "PowerShell(git reset --hard *)",
+            "PowerShell(git branch -D *)",
+            "PowerShell(git remote *)"
+        ],
         "deny": [
             "Read(**/.env)",
             "Read(**/.env.*)",
@@ -18,18 +30,6 @@
             "Bash(gh pr merge *)",
             "PowerShell(gh pr create *)",
             "PowerShell(gh pr merge *)"
-        ],
-        "ask": [
-            "Bash(git merge *)",
-            "Bash(git rebase *)",
-            "Bash(git reset --hard *)",
-            "Bash(git branch -D *)",
-            "Bash(git remote *)",
-            "PowerShell(git merge *)",
-            "PowerShell(git rebase *)",
-            "PowerShell(git reset --hard *)",
-            "PowerShell(git branch -D *)",
-            "PowerShell(git remote *)"
         ]
     },
     "hooks": {
@@ -39,7 +39,13 @@
                     {
                         "type": "command",
                         "command": "uv",
-                        "args": ["run", "--no-project", "--offline", "python", "${CLAUDE_PROJECT_DIR}/.claude/hooks/task_gate.py"],
+                        "args": [
+                            "run",
+                            "--no-project",
+                            "--offline",
+                            "python",
+                            "${CLAUDE_PROJECT_DIR}/.claude/hooks/task_gate.py"
+                        ],
                         "timeout": 30
                     }
                 ]
@@ -51,7 +57,13 @@
                     {
                         "type": "command",
                         "command": "uv",
-                        "args": ["run", "--no-project", "--offline", "python", "${CLAUDE_PROJECT_DIR}/.claude/hooks/task_gate.py"],
+                        "args": [
+                            "run",
+                            "--no-project",
+                            "--offline",
+                            "python",
+                            "${CLAUDE_PROJECT_DIR}/.claude/hooks/task_gate.py"
+                        ],
                         "timeout": 300
                     }
                 ]

@@ -23,7 +23,7 @@ CLAUDE.md                      규칙 (TODO 채우기)
 
 ## 동작
 조사(researcher 팀) → 작업 분할 → 구현(implementer, worktree) → SubagentStop에서 verify.py 자동 검증
-→ verifier 팀 교차 검증 → PASS면 병합 후보 (병합은 사용자 승인)
+→ verifier 팀 교차 검증 → PASS면 병합 후보 (`main` 반영은 사용자 지시)
 
 ## 주의
 - Agent Teams는 **실험 기능**이다. 대화형 세션에서만 팀이 생기고(`-p` 불가), `/resume`하면 팀원이 복원되지 않는다.

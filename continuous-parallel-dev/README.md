@@ -55,7 +55,7 @@ uv run --no-project --offline python .claude/hooks/integrate.py <작업 브랜�
 ## 주의
 - 통합할 때마다 전체 테스트를 돈다. 테스트가 길면 통합이 병목이 된다. 3명으로 시작해 처리량을 보고 조절한다.
 - verifier 판정은 integrate.py가 확인하지 못한다(테스트 보고서만 본다). verifier PASS 뒤에만 통합하는 것은 manager 지침이다.
-- 충돌을 풀 때 implementer의 `git merge <통합 브랜치>`는 승인 창이 뜬다. 충돌 해결은 사람이 한 번 보게 한 설계다.
+- merge·rebase는 승인 없이 실행된다. 보호 브랜치에 넣지 않는 것은 `integrate.py`와 지침이 지킨다.
 - 통합된 작업의 worktree는 자동으로 지우지 않는다. manager가 보고한 목록을 보고 지운다.
 - `main` 반영과 push는 항상 사용자가 한다.
 - 실제 Claude Code 세션에서 끝까지 돌려 본 적은 아직 없다. `integrate.py`는 `tests/test_integrate.py`로 검증했다.

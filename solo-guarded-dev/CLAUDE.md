@@ -6,7 +6,8 @@
 - <!-- TODO: 예) 조사 단계다. 사용자가 지시하기 전에는 코드를 수정하지 않는다. / 구현 단계다. 범위: ... -->
 
 ## 절대 규칙
-- 사용자 승인 없이 git push, 원격 저장소 변경, 브랜치 병합을 하지 않는다.
+- git push는 하지 않는다(사람이 한다). 병합·rebase·브랜치 삭제는 승인 없이 할 수 있지만,
+  검증을 통과한 작업만 병합하고 `main`/`master`에는 사용자가 지시할 때만 반영한다.
 - 사용자 승인 없이 패키지를 설치하지 않는다.
 - `.env`, 키 파일 등 인증 정보를 읽거나 출력하지 않는다.
 - 프로젝트 소스·내부 정보를 외부 서비스로 보내지 않는다. 공개 문서 검색만 허용한다.
@@ -20,7 +21,7 @@
 이 문서의 규칙은 지침이다. 실제 차단은 아래가 담당하며, 사용자 승인 없이 수정하지 않는다.
 - `.claude/settings.json`
   - 거부: `.env`·키 파일 읽기, `git push`, `gh pr create/merge`
-  - 승인 필요: merge, rebase, `reset --hard`, `branch -D`, `git remote`
+  - 승인 없이 허용(자동 루프용): merge, rebase, `reset --hard`, `branch -D`, `git remote`
 - `.claude/hooks/verify.py` + `verify.config.json`: 세션이 응답을 마칠 때(Stop) 관련 변경이 있으면 테스트를 돌린다.
   FAIL/BLOCKED면 Claude가 멈추지 않고 이어서 고치거나 보고한다.
 

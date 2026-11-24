@@ -6,7 +6,8 @@
 - <!-- TODO: 예) 설계 단계다. 사용자가 지시하기 전에는 구현을 시작하지 않는다. -->
 
 ## 절대 규칙
-- 사용자 승인 없이 git push, 원격 저장소 변경, 브랜치 병합을 하지 않는다.
+- git push는 하지 않는다(사람이 한다). 병합·rebase·브랜치 삭제는 승인 없이 할 수 있지만,
+  검증을 통과한 작업만 병합하고 `main`/`master`에는 사용자가 지시할 때만 반영한다.
 - 사용자 승인 없이 패키지를 설치하지 않는다.
 - `.env`, 키 파일 등 인증 정보를 읽거나 출력하지 않는다.
 - 프로젝트 소스·내부 정보를 외부 서비스로 보내지 않는다. 공개 문서 검색만 허용한다.
@@ -21,7 +22,7 @@
 이 문서와 에이전트 문서의 규칙은 지침이다. 실제 차단은 아래가 담당하며, 사용자 승인 없이 수정하지 않는다.
 - `.claude/settings.json`
   - 거부: `.env`·키 파일 읽기, `git push`, `gh pr create/merge`
-  - 승인 필요: 직접 하는 merge·rebase, `branch -D`, `worktree remove`, `git remote`
+  - 승인 없이 허용(자동 루프용): merge, rebase, `branch -D`, `worktree remove`, `git remote`
   - 허용: `.claude/hooks/integrate.py` (검증된 브랜치만, 보호 브랜치가 아닌 통합 브랜치에만 병합)
   - Agent Teams 끔(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0`), worktree는 현재 HEAD에서 분기(`worktree.baseRef: head`)
 - `.claude/hooks/verify.py` + `verify.config.json`: 메인 세션 종료(Stop)와 implementer 종료(SubagentStop) 때 자동 검증

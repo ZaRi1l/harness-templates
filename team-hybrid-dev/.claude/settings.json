@@ -8,6 +8,18 @@
         "baseRef": "head"
     },
     "permissions": {
+        "allow": [
+            "Bash(git merge *)",
+            "Bash(git rebase *)",
+            "Bash(git branch -D *)",
+            "Bash(git worktree remove *)",
+            "Bash(git remote *)",
+            "PowerShell(git merge *)",
+            "PowerShell(git rebase *)",
+            "PowerShell(git branch -D *)",
+            "PowerShell(git worktree remove *)",
+            "PowerShell(git remote *)"
+        ],
         "deny": [
             "Read(**/.env)",
             "Read(**/.env.*)",
@@ -21,18 +33,6 @@
             "Bash(gh pr merge *)",
             "PowerShell(gh pr create *)",
             "PowerShell(gh pr merge *)"
-        ],
-        "ask": [
-            "Bash(git merge *)",
-            "Bash(git rebase *)",
-            "Bash(git branch -D *)",
-            "Bash(git worktree remove *)",
-            "Bash(git remote *)",
-            "PowerShell(git merge *)",
-            "PowerShell(git rebase *)",
-            "PowerShell(git branch -D *)",
-            "PowerShell(git worktree remove *)",
-            "PowerShell(git remote *)"
         ]
     },
     "hooks": {

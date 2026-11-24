@@ -2,7 +2,7 @@
 
 1인 대화형 개발용 Claude Code 하네스 템플릿이다. 에이전트나 worktree 없이 두 가지만 한다.
 
-- **안전장치**: push와 PR 생성은 거부한다. merge, rebase, `reset --hard`, 브랜치 삭제, remote 변경은 승인이 필요하다. 인증 파일은 읽기를 거부한다.
+- **안전장치**: push와 PR 생성은 거부한다. merge, rebase, `reset --hard`, 브랜치 삭제, remote 변경은 자동 루프를 위해 승인 없이 허용한다. 인증 파일은 읽기를 거부한다.
 - **자동 테스트**: Claude가 응답을 마칠 때마다(Stop Hook) 관련 파일이 바뀌었으면 테스트를 돌린다.
   실패하면 Claude가 멈추지 않고 이어서 고친다.
 
