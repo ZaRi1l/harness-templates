@@ -31,7 +31,7 @@ CLAUDE.md                        프로젝트 규칙 템플릿 (TODO 채우기)
 4. `.claude/hooks/verify.config.json`을 프로젝트에 맞게 고친다 (아래 표).
 5. 수동으로 한 번 돌려 본다: `python .claude/hooks/verify.py --target . --force`
    결과는 stderr에 나오고, 보고서는 `.git/claude-verify-report.json`에 남는다.
-6. 병렬 개발을 하려면 `claude --agent manager`로 실행한다.
+6. 병렬 개발을 하려면 `claude --agent manager`로 실행한다. 작은 작업은 일반 세션에서 `@manager`로 불러도 된다(루트 README "실행 방법").
 
 ### 필요한 것
 - git

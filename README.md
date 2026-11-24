@@ -29,6 +29,20 @@ Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를
 필요한 것: git, Hook 실행용 `uv`(없으면 Hook의 `command`를 `python`으로 바꾼다). `verify.py`는 표준 라이브러리만 쓴다(Python 3.8+).
 `verify.config.json`의 키 설명과 pytest·Node·Gradle 예시는 [`verified-parallel-dev/README.md`](verified-parallel-dev/README.md)에 있다.
 
+## 실행 방법
+권한 설정과 Hook(자동 테스트)은 어떻게 열든 똑같이 적용된다. 달라지는 것은 메인 세션이 팀장(manager / lead)으로 행동하느냐다.
+
+| 상황 | 방법 | 비고 |
+|---|---|---|
+| 평소 작업 | `claude` | `solo-guarded-dev`는 이것만 쓴다 |
+| 작은 작업 몇 개를 나눠 맡길 때 | 지금 세션에서 `@manager 작업 A, B를 나눠서 해줘` (verified·continuous만) | manager가 서브에이전트로 떠서 implementer·verifier를 띄운다. 일하는 동안 사람과 대화하지 못하고 끝날 때 요약 하나만 돌려준다 |
+| 큰 작업을 맡길 때 | 새 터미널에서 `claude --agent manager` (team-shared-dev는 `--agent lead`) | 팀장 지침과 도구 제한(직접 구현 금지)이 처음부터 적용된다. 중간에 보고·질문할 수 있다 |
+
+- 이미 연 세션을 중간에 팀장으로 바꾸는 방법은 없다. 팀장으로 쓰려면 새 세션을 연다.
+- 팀 템플릿(team-shared-dev, team-hybrid-dev)은 `@` 호출로 쓸 수 없다. Agent Teams는 메인 세션만 팀을 만들 수 있다.
+- 프로젝트를 늘 팀장으로 열고 싶으면 `.claude/settings.json`에 `"agent": "manager"`를 넣는다. 그러면 간단한 질문도 팀장으로 시작한다.
+- 일반 `claude` 세션에서 "manager.md 절차대로 해"라고 시킬 수도 있지만, 그때 직접 구현 금지는 지침일 뿐 강제되지 않는다.
+
 ## 개발
 모든 템플릿의 `verify.py`는 같은 파일이다. 고치면 모두 같이 고친다(테스트가 같은지 검사한다).
 

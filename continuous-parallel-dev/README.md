@@ -35,7 +35,7 @@ CLAUDE.md                          규칙 (TODO 채우기)
    `verify.config.json`의 키 설명은 `verified-parallel-dev/README.md`에 있다.
 2. `.gitignore`에 `.claude/worktrees/`, `.claude/settings.local.json`, `.claude/work-queue.md`를 넣는다.
 3. 통합 브랜치를 만든다: `git switch -c integration`
-4. `claude --agent manager`로 실행하고 할 일 목록을 준다.
+4. `claude --agent manager`로 실행하고 할 일 목록을 준다. 작은 작업은 일반 세션에서 `@manager`로 불러도 된다(루트 README "실행 방법").
 5. 끝나면 `integration`을 확인하고 `main`에 직접 반영한다(`git switch main && git merge integration`).
 
 ## integrate.py

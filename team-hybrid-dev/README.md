@@ -19,7 +19,7 @@ CLAUDE.md                      규칙 (TODO 채우기)
 1. `CLAUDE.md`와 `.claude/`를 프로젝트 루트에 복사하고 TODO와 `verify.config.json`을 채운다.
    `verify.config.json`의 키 설명은 `verified-parallel-dev/README.md`에 있다.
 2. `.gitignore`에 `.claude/worktrees/`와 `.claude/settings.local.json`을 추가한다.
-3. `claude --agent manager`로 실행하고 할 일을 말한다.
+3. `claude --agent manager`로 실행하고 할 일을 말한다. Agent Teams는 메인 세션만 팀을 만들 수 있어서, 이 템플릿은 반드시 새 세션으로 연다.
 
 ## 동작
 조사(researcher 팀) → 작업 분할 → 구현(implementer, worktree) → SubagentStop에서 verify.py 자동 검증

@@ -16,7 +16,7 @@ CLAUDE.md                      규칙 (TODO 채우기)
 ## 사용법
 1. `CLAUDE.md`와 `.claude/`를 프로젝트 루트에 복사하고 TODO와 `verify.config.json`을 채운다.
 2. 작업 브랜치를 만든다: `git switch -c feature/xxx`
-3. `claude --agent lead` 로 실행하고 할 일을 말한다.
+3. `claude --agent lead` 로 실행하고 할 일을 말한다. Agent Teams는 메인 세션만 팀을 만들 수 있어서, 이 템플릿은 반드시 새 세션으로 연다.
 
 ## 동작
 - 작업 설명에는 `담당 파일:`과 `완료 기준:` 줄이 있어야 한다. 담당 파일이 열린 작업과 겹치면 생성이 거부된다.
