@@ -49,12 +49,13 @@ flowchart TD
 |---|---|---|
 | 평소 작업 | `claude` | `solo-guarded-dev`는 이것만 쓴다 |
 | 작은 작업 몇 개를 나눠 맡길 때 | 지금 세션에서 `@manager 작업 A, B를 나눠서 해줘` (verified·continuous만) | manager가 서브에이전트로 떠서 implementer·verifier를 띄운다. 일하는 동안 사람과 대화하지 못하고 끝날 때 요약 하나만 돌려준다 |
-| 큰 작업을 맡길 때 | 새 터미널에서 `claude --agent manager` (team-shared-dev는 `--agent lead`) | 팀장 지침과 도구 제한(직접 구현 금지)이 처음부터 적용된다. 중간에 보고·질문할 수 있다 |
+| 큰 작업을 맡길 때 | 새 터미널에서 `claude --agent manager` (team-shared-dev는 `--agent lead`) | 팀장 지침과 도구 목록(띄울 수 있는 에이전트 제한 포함)이 처음부터 적용된다. 중간에 보고·질문할 수 있다 |
 
 - 이미 연 세션을 중간에 팀장으로 바꾸는 방법은 없다. 팀장으로 쓰려면 새 세션을 연다.
 - 팀 템플릿(team-shared-dev, team-hybrid-dev)은 `@` 호출로 쓸 수 없다. Agent Teams는 메인 세션만 팀을 만들 수 있다.
 - 프로젝트를 늘 팀장으로 열고 싶으면 `.claude/settings.json`에 `"agent": "manager"`를 넣는다. 그러면 간단한 질문도 팀장으로 시작한다.
-- 일반 `claude` 세션에서 "manager.md 절차대로 해"라고 시킬 수도 있지만, 그때 직접 구현 금지는 지침일 뿐 강제되지 않는다.
+- 일반 `claude` 세션에서 "manager.md 절차대로 해"라고 시킬 수도 있다.
+- 팀장에게는 문서·계획 파일을 쓰도록 Write·Edit가 있다. "제품 코드를 직접 고치지 않는다"는 어떻게 열든 지침이고, 도구로 강제되지는 않는다.
 
 ## 개발
 모든 템플릿의 `verify.py`는 같은 파일이다. 고치면 모두 같이 고친다(테스트가 같은지 검사한다).
