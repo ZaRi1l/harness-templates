@@ -19,7 +19,11 @@
             "Bash(git merge *)",
             "Bash(git worktree remove *)",
             "PowerShell(git merge *)",
-            "PowerShell(git worktree remove *)"
+            "PowerShell(git worktree remove *)",
+            "Bash(git add *)",
+            "Bash(git commit *)",
+            "PowerShell(git add *)",
+            "PowerShell(git commit *)"
         ],
         "deny": [
             "Read(**/.env)",

@@ -22,7 +22,11 @@
             "Bash(git merge *)",
             "Bash(git worktree remove *)",
             "PowerShell(git merge *)",
-            "PowerShell(git worktree remove *)"
+            "PowerShell(git worktree remove *)",
+            "Bash(git add *)",
+            "Bash(git commit *)",
+            "PowerShell(git add *)",
+            "PowerShell(git commit *)"
         ],
         "deny": [
             "Read(**/.env)",
@@ -50,13 +54,8 @@
             "Edit(**/.claude/hooks/**)",
             "Edit(**/.claude/agents/**)",
             "Edit(**/.claude/settings.json)",
-            "Write(**/.claude/hooks/**)",
-            "Write(**/.claude/agents/**)",
-            "Write(**/.claude/settings.json)",
             "Edit(**/.claude/skills/**)",
-            "Write(**/.claude/skills/**)",
-            "Edit(**/.claude/previewUI/**)",
-            "Write(**/.claude/previewUI/**)"
+            "Edit(**/.claude/previewUI/**)"
         ]
     },
     "hooks": {

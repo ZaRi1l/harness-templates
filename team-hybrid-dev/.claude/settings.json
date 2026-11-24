@@ -18,7 +18,11 @@
             "PowerShell(git rebase *)",
             "PowerShell(git branch -D *)",
             "PowerShell(git worktree remove *)",
-            "PowerShell(git remote *)"
+            "PowerShell(git remote *)",
+            "Bash(git add *)",
+            "Bash(git commit *)",
+            "PowerShell(git add *)",
+            "PowerShell(git commit *)"
         ],
         "deny": [
             "Read(**/.env)",

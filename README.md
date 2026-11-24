@@ -3,7 +3,7 @@
 Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를 기본으로 갖는다.
 
 - **안전장치**: `git push`·PR 생성 거부(push는 사람이 한다), `.env`·키 파일 읽기 거부.
-  merge·rebase·브랜치 삭제는 자동 루프를 위해 승인 없이 허용한다.
+  `git add`·`commit`과 merge·rebase·브랜치 삭제는 자동 루프를 위해 승인 없이 허용한다(autonomous 템플릿은 rebase·`reset --hard`·`branch -D`를 묻는다).
 - **검증 게이트**: `verify.py` Hook이 관련 파일이 바뀌었을 때 테스트를 돌려 PASS / SKIP / FAIL / BLOCKED로 판정한다.
   FAIL·BLOCKED면 Claude가 멈추지 않고 고치거나 보고한다. 테스트 명령은 `verify.config.json`에서 정한다.
 
