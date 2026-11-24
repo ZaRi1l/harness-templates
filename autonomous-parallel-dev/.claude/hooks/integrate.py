@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -157,9 +156,7 @@ def attempt(root: Path, cfg: dict, task_id: str):
         return "MERGED", f"'{info['integ']}' {base[:7]} -> {merged[:7]}, 임시 worktree에서 전체 테스트 통과", \
             {"sha": sha, "merged": merged, "base": base, "tests": report.get("command")}
     finally:
-        S.run_git(root, "worktree", "remove", "--force", str(tmp))
-        shutil.rmtree(str(tmp), ignore_errors=True)
-        S.run_git(root, "worktree", "prune")
+        S.remove_worktree(root, tmp)
 
 
 def main() -> int:

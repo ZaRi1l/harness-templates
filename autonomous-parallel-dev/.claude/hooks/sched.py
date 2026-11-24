@@ -145,7 +145,7 @@ class FileLock:
                 os.write(fd, f"{os.getpid()} {now()}".encode())
                 os.close(fd)
                 return
-            except FileExistsError:
+            except (FileExistsError, PermissionError):  # Windows는 지워지는 중인 파일에 PermissionError를 낸다
                 try:
                     if time.time() - self.path.stat().st_mtime > self.stale:
                         os.unlink(str(self.path))
@@ -184,7 +184,14 @@ def store(root: Path, write: bool = True):
                 json.dump(st, fh, ensure_ascii=False, indent=1)
                 fh.flush()
                 os.fsync(fh.fileno())
-            os.replace(str(tmp), str(path))
+            for attempt in range(40):  # Windows: 백신 등이 파일을 잠깐 잡고 있으면 교체가 거부된다
+                try:
+                    os.replace(str(tmp), str(path))
+                    break
+                except PermissionError:
+                    if attempt == 39:
+                        raise
+                    time.sleep(0.05)
 
 
 # ---------- 규칙 ----------
@@ -369,11 +376,20 @@ def prune_temp(root: Path) -> list:
     removed = []
     base = root / ".claude" / "worktrees"
     for d in sorted(base.glob("_integrate-*")) if base.is_dir() else []:
-        run_git(root, "worktree", "remove", "--force", str(d))
-        shutil.rmtree(str(d), ignore_errors=True)
+        remove_worktree(root, d)
         removed.append(d.name)
-    run_git(root, "worktree", "prune")
     return removed
+
+
+def remove_worktree(root: Path, path: Path) -> None:
+    """임시 worktree를 지운다. Windows에서 파일이 잠깐 잡혀 있을 수 있어 몇 번 다시 시도한다."""
+    for _ in range(20):
+        run_git(root, "worktree", "remove", "--force", str(path))
+        shutil.rmtree(str(path), ignore_errors=True)
+        if not path.exists():
+            break
+        time.sleep(0.1)
+    run_git(root, "worktree", "prune")
 
 
 # ---------- 명령 ----------
