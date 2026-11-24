@@ -20,6 +20,19 @@ Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를
 작업이 계속 이어지고 검증된 것부터 쌓아 가고 싶으면 `continuous-parallel-dev`를 쓴다(`main` 반영은 여전히 사람이 한다).
 팀 템플릿 두 개는 Claude Code의 **실험 기능**(Agent Teams)에 의존한다.
 
+```mermaid
+flowchart TD
+    S{"작업을 겹치지 않는<br/>경로로 나눌 수 있나?"} -->|"아니오"| A["solo-guarded-dev"]
+    S -->|"예"| P{"검증된 것부터<br/>계속 쌓아 가나?"}
+    P -->|"예"| C["continuous-parallel-dev"]
+    P -->|"아니오"| Q{"조사·검증을 여러 관점이<br/>토론하게 하고 싶나?"}
+    Q -->|"아니오"| V["verified-parallel-dev"]
+    Q -->|"예"| R{"구현도 한 폴더에서<br/>팀원끼리 대화하며?"}
+    R -->|"예"| SH["team-shared-dev"]
+    R -->|"아니오 · 격리 우선"| HY["team-hybrid-dev"]
+```
+각 템플릿의 자세한 흐름도는 그 폴더의 README "흐름" 절에 있다.
+
 ## 공통 적용 방법
 1. 고른 템플릿의 `CLAUDE.md`와 `.claude/`를 프로젝트 루트(git 저장소)에 복사한다. 기존 파일이 있으면 합친다.
 2. `CLAUDE.md`의 TODO를 채우고 `.claude/hooks/verify.config.json`을 프로젝트 테스트 명령에 맞춘다.

@@ -9,6 +9,18 @@
 여러 작업을 병렬로 맡기고 독립 검증까지 하려면 `verified-parallel-dev`를 쓴다.
 두 템플릿의 `verify.py`와 `verify.config.json`은 같은 파일이다.
 
+## 흐름
+```mermaid
+flowchart TD
+    U["사용자 요청"] --> C["Claude 세션<br/>구현 · 테스트 · 커밋"]
+    C -->|"응답을 마칠 때"| S{"Stop Hook<br/>verify.py"}
+    S -->|"SKIP<br/>관련 변경 없음 · 이미 통과"| D["응답 끝"]
+    S -->|"PASS"| D
+    S -->|"FAIL"| C
+    S -->|"BLOCKED<br/>환경 문제"| R["사용자에게 보고"]
+```
+권한 설정은 이 흐름 전체에 걸린다: push·PR 생성과 `.env`·키 파일 읽기는 거부된다.
+
 ## 구성
 ```
 CLAUDE.md                        프로젝트 규칙 템플릿 (TODO 채우기)

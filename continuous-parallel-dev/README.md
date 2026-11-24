@@ -3,10 +3,20 @@
 `verified-parallel-dev`에 **작업 대기열**과 **검증 게이트가 붙은 자동 통합**을 더한 템플릿.
 여러 기능을 계속 병렬로 만들고, 검증을 통과한 것부터 통합 브랜치에 쌓아 가는 고처리량 개발용이다.
 
-```
-대기열 ─▶ implementer ×3 (worktree) ─▶ verify.py ─▶ verifier ─▶ integrate.py ─▶ 통합 브랜치
-   ▲              │ 빈자리                                             │ CONFLICT / FAIL
-   └──────────────┴────────────── 다음 작업 / 재작업 ◀──────────────────┘
+## 흐름
+```mermaid
+flowchart TD
+    Q[("work-queue.md<br/>작업 대기열")] -->|"의존이 풀린 작업"| M["manager"]
+    M -->|"빈자리마다 배정 · 최대 3명"| I["implementer<br/>각자 worktree"]
+    I -->|"커밋하고 종료"| H{"SubagentStop Hook<br/>verify.py"}
+    H -->|"FAIL"| I
+    H -->|"PASS"| V{"verifier<br/>독립 검증"}
+    V -->|"FAIL"| I
+    V -->|"PASS"| G{"integrate.py"}
+    G -->|"CONFLICT · FAIL · REJECTED<br/>병합 취소 또는 되돌림"| I
+    G -->|"MERGED<br/>병합 후 전체 테스트 통과"| B["통합 브랜치<br/>integration"]
+    B -->|"다음 작업은 최신 통합본에서 시작"| Q
+    B -.->|"사용자가 결정"| MAIN["main"]
 ```
 
 ## verified-parallel-dev와의 차이

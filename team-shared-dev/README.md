@@ -3,6 +3,21 @@
 Agent Teams로 팀원 여러 명이 **하나의 작업 폴더를 같이 쓰며** 개발하는 템플릿.
 팀원끼리 메시지로 의논하고, 공유 작업 목록에서 일을 나눠 가진다.
 
+## 흐름
+```mermaid
+flowchart TD
+    L["lead<br/>작업 분할"] -->|"TaskCreate<br/>담당 파일 · 완료 기준"| TC{"TaskCreated Hook<br/>형식 · 파일 겹침 검사"}
+    TC -->|"거부"| L
+    TC -->|"통과 · 담당 파일 잠금"| T[("공유 작업 목록")]
+    T --> D["developer ×N<br/>같은 폴더에서 구현"]
+    D -->|"작업 완료로 변경"| CC{"TaskCompleted Hook<br/>전체 테스트"}
+    CC -->|"FAIL"| D
+    CC -->|"PASS · 잠금 해제"| CM["lead가 담당 파일만 커밋"]
+    CM --> R["reviewer ×N<br/>서로 반박 · 확인"]
+    R -->|"지적 사항은 새 작업으로"| L
+```
+팀원끼리는 메시지로 직접 의논한다. 폴더를 공유하므로 담당 파일 잠금이 서로의 작업을 지킨다.
+
 ## 구성
 ```
 CLAUDE.md                      규칙 (TODO 채우기)

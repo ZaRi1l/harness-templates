@@ -21,9 +21,28 @@ CLAUDE.md                      규칙 (TODO 채우기)
 2. `.gitignore`에 `.claude/worktrees/`와 `.claude/settings.local.json`을 추가한다.
 3. `claude --agent manager`로 실행하고 할 일을 말한다. Agent Teams는 메인 세션만 팀을 만들 수 있어서, 이 템플릿은 반드시 새 세션으로 연다.
 
-## 동작
-조사(researcher 팀) → 작업 분할 → 구현(implementer, worktree) → SubagentStop에서 verify.py 자동 검증
-→ verifier 팀 교차 검증 → PASS면 병합 후보 (`main` 반영은 사용자 지시)
+## 흐름
+```mermaid
+flowchart TD
+    U["사용자: 할 일"] --> M["manager"]
+    subgraph TEAM1 ["Agent Teams 팀원"]
+        RS["researcher ×N<br/>관점별 조사 · 서로 반박"]
+    end
+    M -->|"조사가 필요하면"| RS
+    RS -->|"docs/에 정리"| M
+    subgraph SUB ["worktree 서브에이전트"]
+        I["implementer ×3"]
+    end
+    M -->|"isolation: worktree"| I
+    I -->|"커밋하고 종료"| H{"SubagentStop Hook<br/>verify.py"}
+    H -->|"FAIL"| I
+    subgraph TEAM2 ["Agent Teams 팀원"]
+        VT["verifier ×N<br/>관점별 교차 검증"]
+    end
+    H -->|"PASS"| VT
+    VT -->|"FAIL"| I
+    VT -->|"PASS"| C["병합 후보<br/>main 반영은 사용자 지시"]
+```
 
 ## 주의
 - Agent Teams는 **실험 기능**이다. 대화형 세션에서만 팀이 생기고(`-p` 불가), `/resume`하면 팀원이 복원되지 않는다.

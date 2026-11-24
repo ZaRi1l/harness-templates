@@ -11,6 +11,25 @@
 단순한 1인 대화형 개발에도 쓸 수 있다. 메인 세션이 끝날 때도 Stop Hook이 테스트를 돌린다.
 다만 이 구조가 제값을 하는 곳은 "여러 작업을 병렬로 맡기되, 검증 안 된 결과는 받지 않는" 개발이다.
 
+## 흐름
+```mermaid
+flowchart TD
+    U["사용자: 할 일"] --> M["manager<br/>작업 분할 · 담당 경로 지정"]
+    M -->|"isolation: worktree"| I1["implementer A"]
+    M -->|"isolation: worktree"| I2["implementer B"]
+    M -->|"isolation: worktree"| I3["implementer C"]
+    I1 & I2 & I3 -->|"커밋하고 종료"| H{"SubagentStop Hook<br/>verify.py"}
+    H -->|"FAIL"| RW["같은 implementer가 재작업"]
+    RW --> H
+    H -->|"BLOCKED"| UB["보류 · 사용자에게 보고"]
+    H -->|"PASS"| MC["manager<br/>Git 상태 · 보고서 대조"]
+    MC --> V{"verifier<br/>읽기 전용 독립 검증"}
+    V -->|"FAIL"| RW
+    V -->|"PASS"| C["병합 후보"]
+    C --> X["main 반영은 사용자"]
+```
+자리가 비면 manager가 의존이 풀린 다음 작업을 바로 배정한다.
+
 ## 구성
 ```
 CLAUDE.md                        프로젝트 규칙 템플릿 (TODO 채우기)
