@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TEMPLATES = ["solo-guarded-dev", "verified-parallel-dev", "team-shared-dev", "team-hybrid-dev",
+TEMPLATES = ["solo-guarded-dev", "verified-parallel-dev", "team-shared-dev", "team-hybrid-dev", "autonomous-parallel-dev",
              "continuous-parallel-dev"]
 
 GOOD = "def add(a, b):\n    return a + b\n"

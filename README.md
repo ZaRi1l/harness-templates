@@ -13,18 +13,22 @@ Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를
 | [`solo-guarded-dev`](solo-guarded-dev/) | 1인 세션 + Stop Hook | 1인 | 낮음 | 기본 | 대부분의 프로젝트, UI 비중이 큰 일 |
 | [`verified-parallel-dev`](verified-parallel-dev/) | manager + worktree implementer(최대 3) + verifier | 병렬 | 중간 | 높음 | 경로가 나뉜 큰 작업, 변환기·마이그레이션 |
 | [`continuous-parallel-dev`](continuous-parallel-dev/) | verified-parallel-dev + 작업 대기열 + 검증 게이트 자동 통합 | 병렬, 지속 | 높음 | 높음 | 기능을 계속 쌓아 가는 장기 개발 |
+| [`autonomous-parallel-dev`](autonomous-parallel-dev/) | 결정론적 스케줄러 + 조사·설계·미리보기 승인 + 임시 worktree 통합 | 병렬, 자율 | 가장 높음 | 높음 | 작업이 많고 오래 이어지는 프로젝트, 사용자 개입을 줄이고 싶을 때 |
 | [`team-shared-dev`](team-shared-dev/) | Agent Teams, 작업 폴더 공유, 작업 Hook | 팀 3~5 | 높음 | 중간 | 파일 경계가 뚜렷한 새 기능 |
 | [`team-hybrid-dev`](team-hybrid-dev/) | 조사·검증은 팀원, 구현은 worktree | 팀 + 병렬 | 가장 높음 | 가장 높음 | 조사가 먼저 필요하고 틀리면 안 되는 큰 작업 |
 
 고르는 법: 먼저 `solo-guarded-dev`로 시작하고, 작업을 독립 경로로 나눌 수 있을 때 `verified-parallel-dev`로 올린다.
 작업이 계속 이어지고 검증된 것부터 쌓아 가고 싶으면 `continuous-parallel-dev`를 쓴다(`main` 반영은 여전히 사람이 한다).
+조사·설계·미리보기 승인까지 맡기고 상태·병합을 프로그램으로 강제하려면 `autonomous-parallel-dev`를 쓴다(실제 세션 검증 전).
 팀 템플릿 두 개는 Claude Code의 **실험 기능**(Agent Teams)에 의존한다.
 
 ```mermaid
 flowchart TD
     S{"작업을 겹치지 않는<br/>경로로 나눌 수 있나?"} -->|"아니오"| A["solo-guarded-dev"]
     S -->|"예"| P{"검증된 것부터<br/>계속 쌓아 가나?"}
-    P -->|"예"| C["continuous-parallel-dev"]
+    P -->|"예"| AU{"조사·설계·승인까지 맡기고<br/>상태를 프로그램으로 강제?"}
+    AU -->|"아니오"| C["continuous-parallel-dev"]
+    AU -->|"예"| AP["autonomous-parallel-dev"]
     P -->|"아니오"| Q{"조사·검증을 여러 관점이<br/>토론하게 하고 싶나?"}
     Q -->|"아니오"| V["verified-parallel-dev"]
     Q -->|"예"| R{"구현도 한 폴더에서<br/>팀원끼리 대화하며?"}
