@@ -34,7 +34,8 @@
   검증 증거와 커밋의 일치, 미리보기 승인 전 구현 시작.
 - `integrate.py`: 검증된 커밋만, 임시 worktree에서 병합·전체 테스트 뒤 통과한 것만 통합 브랜치에 반영. 보호 브랜치 거부.
 - `verify.py`: Stop / implementer 종료 때 테스트. PASS·SKIP만 통과다.
-- `settings.json`: push·PR 생성·`.env` 읽기 거부. 직접 하는 merge·rebase·`reset --hard`·`branch -D`·`worktree remove`와
+- `settings.json`: push·PR 생성·`.env` 읽기 거부. `git merge`·`git worktree remove`는 자동 루프가 멈추지 않도록 허용하지만,
+  통합 브랜치 병합은 `integrate.py`로만 한다(지침). 직접 하는 rebase·`reset --hard`·`branch -D`·`remote`와
   `.claude/` 수정은 승인 필요.
 
 ## 테스트 실행

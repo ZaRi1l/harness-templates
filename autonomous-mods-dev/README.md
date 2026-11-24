@@ -41,7 +41,6 @@ flowchart TD
 | designer 스킬 | `frontend-design` 미리 불러옴(필수) | `preview-workflow` 미리 불러옴. 디자인 스킬은 있으면 골라 씀(선택) |
 | 에이전트 ↔ 작업 연결 | 없음 | `start`가 준 marker로 연결, 없으면 "미연결" |
 | 이상 감지 | 없음 | 긴 단계(스케줄러), 멈춤·연속 실패·유령 슬롯(Mod). 경고만 하고 판단은 manager |
-| 직접 하는 `git merge`·`worktree remove` | 승인 필요 | 허용(자동 루프가 멈추지 않게). rebase·`reset --hard`·`branch -D`는 계속 승인 필요 |
 | 필요한 것 | Claude Code | Claude Code 2.1.331에서 검증(Mods API는 early access) |
 
 고르는 법: Mods를 쓸 수 없거나 화면 없이 안정적인 엔진만 필요하면 `autonomous-parallel-dev`. 사용자가 대화하며 진행을 지켜보고 결정·검토를 자주 해야 하면 이 템플릿.

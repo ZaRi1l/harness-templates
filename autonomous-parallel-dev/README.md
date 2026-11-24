@@ -58,7 +58,7 @@ stateDiagram-v2
 | 병합 | 통합 브랜치에 병합 후 테스트, 실패하면 되돌림 | 임시 worktree에서 테스트 후 통과한 것만 fast-forward |
 | 복구 | 대기열 파일을 읽고 이어감 | `sched recover`가 Git 상태와 대조 |
 | 정리 | 수동 | `sched cleanup`이 조건 확인 후 삭제 |
-| 직접 하는 merge 등 | 허용 | 승인 필요(프로그램을 통하면 묻지 않음) |
+| 직접 하는 merge 등 | 허용 | merge·`worktree remove`는 허용, rebase·`reset --hard`·`branch -D`는 승인 필요(프로그램을 통하면 묻지 않음) |
 
 ## 구성
 ```
@@ -123,6 +123,8 @@ sched revise UI-1 --feedback "..."      # 수정 요청 → 다시 미리보기 
 - 병렬 실행은 manager가 한 번에 여러 에이전트를 띄워야 일어난다. 프로그램은 한도와 순서만 보장한다.
 - 프로그램을 거치는 일만 강제된다. 작업 분할의 질, verifier 판단의 질, "직접 고치지 않는다"는 지침이다.
 - 권한 규칙은 명령 문자열 비교라 샌드박스가 아니다. Bash로 우회할 수 있다.
+- 직접 하는 `git merge`는 묻지 않는다. 에이전트가 지침을 어기고 통합 브랜치에서 직접 병합하면 검증 게이트를 거치지 않는다.
+  한 세션만 다시 묻게 하려면 `claude --agent manager --settings '{"permissions":{"ask":["Bash(git merge *)"]}}'`.
 - 승인은 CLI나 manager를 통해서만 한다. 대시보드는 읽기 전용 HTML이고 로컬 서버는 없다.
 - 슬롯은 자동으로 늘거나 줄지 않는다. 지표를 보고 `sched limit`로 조절한다.
 - designer는 `frontend-design` 플러그인의 스킬을 미리 불러온다. 플러그인이 없으면 설치하거나 `designer.md`의 `skills:` 두 줄을 지운다.

@@ -15,7 +15,11 @@
             "PowerShell(python .claude/hooks/sched.py *)",
             "PowerShell(python .claude/hooks/integrate.py *)",
             "PowerShell(uv run --no-project --offline python .claude/hooks/sched.py *)",
-            "PowerShell(uv run --no-project --offline python .claude/hooks/integrate.py *)"
+            "PowerShell(uv run --no-project --offline python .claude/hooks/integrate.py *)",
+            "Bash(git merge *)",
+            "Bash(git worktree remove *)",
+            "PowerShell(git merge *)",
+            "PowerShell(git worktree remove *)"
         ],
         "deny": [
             "Read(**/.env)",
@@ -32,17 +36,13 @@
             "PowerShell(gh pr merge *)"
         ],
         "ask": [
-            "Bash(git merge *)",
             "Bash(git rebase *)",
             "Bash(git reset --hard *)",
             "Bash(git branch -D *)",
-            "Bash(git worktree remove *)",
             "Bash(git remote *)",
-            "PowerShell(git merge *)",
             "PowerShell(git rebase *)",
             "PowerShell(git reset --hard *)",
             "PowerShell(git branch -D *)",
-            "PowerShell(git worktree remove *)",
             "PowerShell(git remote *)",
             "Edit(**/.claude/hooks/**)",
             "Edit(**/.claude/agents/**)",
