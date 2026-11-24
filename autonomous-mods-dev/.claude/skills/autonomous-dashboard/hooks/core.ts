@@ -347,6 +347,34 @@ export const launcherArgv = (launcher: string): string[] =>
 // ---------------------------------------------------------------- 경로와 브라우저
 
 const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+
+const isAbsolute = (p: string) => /^([A-Za-z]:)?[\\/]/.test(p)
+/** base 기준으로 rel을 잇고 `.`·`..`를 정리한다. rel이 절대 경로면 rel을 쓴다. 구분자는 /. */
+export const joinPath = (base: string, rel: string) => {
+  const raw = isAbsolute(rel) ? norm(rel) : `${norm(base)}/${rel.replace(/\\/g, '/')}`
+  const drive = /^[A-Za-z]:/.exec(raw)?.[0] ?? ''
+  const out: string[] = []
+  for (const part of raw.slice(drive.length).split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') out.pop()
+    else out.push(part)
+  }
+  return `${drive}/${out.join('/')}`
+}
+/** 상위 폴더. 드라이브·파일 시스템 루트면 null. */
+export const parentDir = (p: string) => {
+  const n = joinPath(p, '.')
+  const drive = /^[A-Za-z]:/.exec(n)?.[0] ?? ''
+  const rest = n.slice(drive.length)
+  if (rest === '/') return null
+  const cut = rest.lastIndexOf('/')
+  return drive + (cut === 0 ? '/' : rest.slice(0, cut))
+}
+/** linked worktree의 `.git` 파일(`gitdir: …`)에서 git 폴더를 읽는다. */
+export const gitdirOf = (gitFile: string, dir: string) => {
+  const m = /^gitdir:\s*(.+?)\s*$/m.exec(gitFile)
+  return m?.[1] ? joinPath(dir, m[1]) : null
+}
 /** 같은 폴더이거나 그 아래인지. Windows는 대소문자를 가리지 않는다. */
 export const isInside = (child: string, parent: string, caseless: boolean) => {
   const c = caseless ? norm(child).toLowerCase() : norm(child)

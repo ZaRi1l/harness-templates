@@ -54,17 +54,42 @@ async function flush($: EngineInterface) {
   }
 }
 
-/** 저장소의 공통 git 폴더를 찾는다. sched.py의 main_root()와 같은 규칙이다. */
-async function discover($: EngineInterface) {
-  const r = await $.process.run(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 10_000 }).catch(() => null)
-  const common = r && r.exitCode === 0 ? r.stdout.trim() : ''
+/** git 없이 파일만으로 공통 git 폴더를 찾는다: 위로 올라가며 `.git` 폴더, 또는 worktree의 `.git` 파일 → commondir. */
+async function commonDirFromFiles($: EngineInterface, start: string): Promise<string | null> {
+  let dir: string | null = C.joinPath(start, '.')
+  for (let i = 0; dir && i < 64; i++, dir = C.parentDir(dir)) {
+    const dotgit = `${dir === '/' || dir.endsWith('/') ? dir : `${dir}/`}.git`
+    const st = await $.fs.stat(dotgit).catch(() => null)
+    if (!st) continue
+    if (st.kind === 'dir') return C.joinPath(dotgit, '.')
+    const gitdir = C.gitdirOf(await $.fs.read(dotgit).catch(() => ''), dir)
+    if (!gitdir) return null
+    const common = (await $.fs.read(`${gitdir}/commondir`).catch(() => '')).trim()
+    return common ? C.joinPath(gitdir, common) : gitdir
+  }
+  return null
+}
+
+/** 저장소의 공통 git 폴더를 찾는다. sched.py의 main_root()와 같은 규칙이다. git 실행이 안 되면 파일로 찾는다. */
+async function discover($: EngineInterface, cwd?: string) {
+  const at = cwd ?? (await $.session.cwd().catch(() => '.'))
+  let why = ''
+  const r = await $.process
+    .run(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: at, timeoutMs: 10_000 })
+    .catch(err => {
+      why = `git 실행 실패: ${err instanceof Error ? err.message : String(err)}`
+      return null
+    })
+  if (r && r.exitCode !== 0) why = `git rev-parse 실패: ${C.fit(r.stderr.trim(), 120)}`
+  const common = (r && r.exitCode === 0 ? r.stdout.trim() : '') || (await commonDirFromFiles($, at)) || ''
   if (!common) {
-    await update($, metaA, m => ({ ...C.EMPTY_META, ...m, root: null, stateDir: null, error: 'git 저장소가 아니다. 저장소 루트에서 세션을 연다' }))
+    const error = `git 저장소를 찾지 못했다(${at}). ${why || '.git이 없다'}. 저장소 루트에서 세션을 연다`
+    await update($, metaA, m => ({ ...C.EMPTY_META, ...m, root: null, stateDir: null, error }))
     return
   }
-  const cut = Math.max(common.lastIndexOf('/'), common.lastIndexOf('\\'))
-  const root = common.slice(0, cut)
-  await update($, metaA, m => ({ ...C.EMPTY_META, ...m, root, stateDir: `${common}/claude-auto` }))
+  const c = C.joinPath(common, '.')
+  const root = C.parentDir(c) ?? c
+  await update($, metaA, m => ({ ...C.EMPTY_META, ...m, root, stateDir: `${c}/claude-auto`, error: null }))
 }
 
 /** 스냅샷 파일이 바뀌었을 때만 읽는다. 읽기에 실패하면 이전 스냅샷을 두고 stale로 표시한다(작업 상태로 바꾸지 않는다). */
@@ -163,6 +188,8 @@ async function observe($: EngineInterface) {
 async function onTick($: EngineInterface) {
   tick += 1
   await flush($)
+  // 시작할 때 저장소가 없었으면(manager가 git init하기 전) 몇 틱마다 다시 찾는다
+  if (!(await read($, metaA)).root && tick % 5 === 0) await discover($)
   await poll($)
   if (tick % 3 === 0) {
     await observe($)
@@ -248,7 +275,7 @@ export const register: Register = (on, options) => {
       immediate: true,
     })
     sysname = (await $.session.machine().catch(() => null))?.sysname ?? ''
-    await discover($)
+    await discover($, e.cwd)
     await poll($, true)
     const m = await read($, metaA)
     if (!(await read($, snapA)) && m.stateDir && (await $.fs.exists(`${m.stateDir}/state.json`).catch(() => false))) {

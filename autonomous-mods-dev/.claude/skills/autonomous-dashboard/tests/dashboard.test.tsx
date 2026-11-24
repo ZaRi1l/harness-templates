@@ -198,7 +198,7 @@ type Calls = { argv: string[][] }
 // 엔진은 realPath를 실행 중인 OS의 표기로 돌려준다(Windows면 D:\repo\...). 비교할 때는 / 로 맞춘다.
 const slash = (a: string[] | undefined) => a?.map(x => x.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
 
-const engine = (on: On, snap: Snapshot | string = SNAP): Calls => {
+const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean } = {}): Calls => {
   const calls: Calls = { argv: [] }
   mock.clock(on)
   on('command.register', () => ({ value: { command: 'autonomous' } }))
@@ -212,6 +212,7 @@ const engine = (on: On, snap: Snapshot | string = SNAP): Calls => {
   on('ui.toast', () => ({ value: undefined }))
   on('process.run', (_, e) => {
     calls.argv.push([...e.argv])
+    if (opts.gitFails && e.argv[0] === 'git') throw new Error('spawn git ENOENT')
     const out = e.argv[0] === 'git' ? `${ROOT}/.git\n` : '{}'
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -250,6 +251,24 @@ test('세션을 시작하면 스냅샷을 읽어 모든 표면에 그린다', as
     expect(await ui.find({ type: 'Text', text: /실행 미확인 1/ })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('git을 실행하지 못해도 .git을 파일로 찾아 그린다', async ($, on) => {
+  engine(on, SNAP, { gitFails: true })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /1\/4/ }))?.text).toContain('작업 수 기준')
+  await ui.unmount()
+})
+
+test('경로 도우미: 드라이브·상위 폴더·worktree의 .git 파일', async () => {
+  expect(C.joinPath('D:\\a\\b', '..\\c')).toBe('D:/a/c')
+  expect(C.joinPath('/x/y', '/z')).toBe('/z')
+  expect(C.parentDir('D:/a')).toBe('D:/')
+  expect(C.parentDir('D:/')).toBe(null)
+  expect(C.parentDir('/')).toBe(null)
+  expect(C.gitdirOf('gitdir: ../main/.git/worktrees/w1\n', 'D:/p/w1')).toBe('D:/p/main/.git/worktrees/w1')
+  expect(C.joinPath('D:/p/main/.git/worktrees/w1', '../..')).toBe('D:/p/main/.git')
 })
 
 test('좁은 inline 자리에서는 mini 요약만 그린다', async ($, on) => {
