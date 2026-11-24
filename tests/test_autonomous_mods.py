@@ -3,6 +3,8 @@
 import hashlib
 import json
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -300,6 +302,51 @@ class TestModManifest(unittest.TestCase):
         core = (self.MOD / "hooks/core.ts").read_text(encoding="utf-8")
         parse = core[core.index("export const parseConfig"):]
         self.assertEqual(options, set(re.findall(r"\bo\.(\w+)", parse)))
+
+
+class TestBootstrap(unittest.TestCase):
+    """manager의 '시작 준비' 절차가 프로그램과 맞는지: 템플릿 + 설계 문서만 있는 저장소에서 시작한다."""
+    TEMPLATE = Path(base.__file__).resolve().parent.parent / MODS
+
+    def test_fresh_repo_with_only_template_reaches_init(self):
+        import shutil
+        import tempfile
+        from helpers import rmtree
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(rmtree, tmp)
+        repo = tmp / "새 프로젝트"
+        repo.mkdir()
+        git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, encoding="utf-8")
+        sched = lambda *a: subprocess.run([sys.executable, str(repo / ".claude/hooks/sched.py"), *a], cwd=str(repo),
+                                          capture_output=True, text=True, encoding="utf-8")
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@e")
+        git("config", "user.name", "t")
+        shutil.copytree(self.TEMPLATE / ".claude", repo / ".claude")
+        shutil.copy(self.TEMPLATE / "CLAUDE.md", repo / "CLAUDE.md")
+        (repo / "docs").mkdir()
+        (repo / "docs/design.md").write_text("# 설계\n", encoding="utf-8")
+        self.assertEqual(sched("status").returncode, 0)  # 커밋이 없어도 상태를 본다
+        self.assertIn("TODO", (repo / "CLAUDE.md").read_text(encoding="utf-8"))  # manager가 준비가 필요하다고 판단하는 근거
+        git("add", "-A")
+        self.assertEqual(git("commit", "-qm", "chore: 하네스 시작 준비").returncode, 0)
+        self.assertEqual(sched("init").returncode, 2)  # main은 통합 브랜치가 될 수 없다
+        git("switch", "-qc", "integration")
+        r = sched("init")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["integration_branch"], "integration")
+
+    def test_gitignore_lines_cover_paths_the_harness_creates(self):
+        manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
+        integrate = (self.TEMPLATE / ".claude/hooks/integrate.py").read_text(encoding="utf-8")
+        self.assertIn('root / ".claude" / "worktrees"', integrate)
+        for line in (".claude/worktrees/", ".claude/settings.local.json"):
+            self.assertIn(f"`{line}`", manager)
+
+    def test_every_verify_config_key_is_explained_to_manager(self):
+        manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
+        keys = set(json.loads((self.TEMPLATE / ".claude/hooks/verify.config.json").read_text(encoding="utf-8"))) - {"_comment"}
+        self.assertEqual(sorted(k for k in keys if f"`{k}`" not in manager), [])
 
 
 class TestCommonCode(ModsCase):

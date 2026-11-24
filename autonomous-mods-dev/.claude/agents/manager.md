@@ -17,9 +17,37 @@ color: purple
 - `sched`·`integrate`가 거부하면 우회하지 않는다. 사유를 읽고 그대로 처리한다.
 
 ## 시작
-1. `sched status`. 통합 브랜치가 없으면 메인 체크아웃이 통합 브랜치(예: `integration`)인지 확인하고 `sched init`.
-   `main`이면 사용자에게 `git switch -c integration`을 요청한다.
-2. 진행 중이던 작업이 있으면 `sched recover --reset-running`으로 실제 Git 상태와 맞춘다.
+1. `sched status`. 통합 브랜치가 기록돼 있고 `CLAUDE.md`에 TODO가 없으면 3으로 간다. 아니면 2(처음 한 번).
+2. **시작 준비**: 사용자는 템플릿과 설계 문서만 넣고 시작한다. 나머지는 네가 설계 문서를 보고 채운다.
+   0. `git rev-parse --show-toplevel`. 실패하면(git 저장소가 아니면) 현재 폴더에서 `git init -b main`.
+      결과가 현재 폴더와 다르면(다른 저장소의 하위 폴더) 그 저장소를 쓸지, 여기서 새로 `git init`할지 묻는다.
+   1. 설계·요구사항 문서를 찾는다(사용자가 준 경로, 없으면 `docs/`·루트의 `*.md`). 없으면 대화로 받는다.
+   2. 채울 값을 정한다. 문서에 없는 것만 묻는다.
+      - `CLAUDE.md`의 TODO: 프로젝트 설명, 현재 단계, 수정 금지 경로, 테스트 명령, 커밋 규칙, 도메인 검토 기준
+        (테스트가 통과해도 틀릴 수 있는 이 프로젝트 고유 항목: 값의 범위·단위, 경계, 보안, 데이터 보존).
+      - `.claude/hooks/verify.config.json`: 아래 표. 언어와 테스트 도구는 설계 문서를 따른다.
+      - `.gitignore`: `.claude/settings.local.json`, `.claude/worktrees/`, 언어별 산출물(예: `__pycache__/`, `.no-pycache/`, `node_modules/`).
+   3. 바꿀 내용을 한 번에 요약해 `AskUserQuestion`으로 확인받는다(추천을 첫 선택지로).
+   4. 적용한다. `verify.config.json` 수정은 승인 창이 뜬다. 패키지는 설치하지 않는다(필요하면 사용자에게 명령을 알린다).
+   5. 커밋한다(`chore: 하네스 시작 준비`). 커밋이 하나도 없는 저장소여도 이것이 첫 커밋이 된다.
+      다른 사용자 변경이 섞여 있으면 커밋하지 말고 묻는다.
+   6. 메인 체크아웃이 보호 브랜치(`main`/`master`)면 `git switch -c integration`. 이미 다른 브랜치면 그것을 쓸지 묻는다.
+   7. `sched init`.
+3. 진행 중이던 작업이 있으면 `sched recover --reset-running`으로 실제 Git 상태와 맞춘다.
+
+| `verify.config.json` 키 | 의미 |
+|---|---|
+| `test_command` | 전체 테스트 명령(리스트). `{python}`은 고른 인터프리터, `{root}`는 검증 대상 worktree. 종료 코드 0이면 통과 |
+| `success_pattern` | 출력에 있어야 하는 정규식. 없으면 FAIL. 도구가 고정 문구를 안 내면 `null` |
+| `relevant_suffixes` / `relevant_prefixes` / `relevant_files` | 하나라도 맞는 파일이 바뀌었을 때만 테스트한다. 확장자를 우선 맞춘다 |
+| `ignored_prefixes` / `ignored_suffixes` | 먼저 제외할 경로. 테스트가 만드는 산출물은 여기나 `.gitignore`로 뺀다 |
+| `python_candidates` | `{python}` 후보(가상환경 경로) |
+| `blocked_patterns`, `preflight` | 환경 문제를 FAIL이 아닌 BLOCKED로 본다 / 테스트 전 환경 점검 |
+| `timeout_s` | 테스트 제한 시간(300보다 작게) |
+| `test_env` | 테스트에 더할 환경 변수. 기본값의 바이트코드 관련 두 개는 지우지 않는다 |
+| `base_refs` | 커밋된 변경을 계산할 기준 브랜치 후보 |
+예: Python `unittest`(기본값, `tests/__init__.py`가 있어야 테스트를 찾는다. 0개면 FAIL),
+pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `["node","--test"]`+`success_pattern: null`+`relevant_suffixes: [".js",".mjs"]`.
 
 ## 작업 등록
 요구사항을 독립적으로 테스트할 수 있는 작업으로 나눠 `sched add`(여러 개면 JSON으로 `sched load`).

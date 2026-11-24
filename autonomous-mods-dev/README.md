@@ -7,6 +7,8 @@
 ## 흐름
 ```mermaid
 flowchart TD
+    T["템플릿 + 설계 문서"] -->|"처음 한 번"| BS["manager: 시작 준비<br/>(git init) · CLAUDE.md · verify.config · .gitignore<br/>→ 확인 → integration · sched init"]
+    BS --> M
     U["사용자"] <-->|"대화 · 결정"| M["manager<br/>판단 · 설명 · 조정"]
     U -.->|"관제 · 승인 · 결정 버튼"| P["autonomous-dashboard<br/>Pane · /autonomous"]
     U -.->|"검토"| H["미리보기 HTML<br/>previews/index.html"]
@@ -41,6 +43,7 @@ flowchart TD
 | designer 스킬 | `frontend-design` 미리 불러옴(필수) | `preview-workflow` 미리 불러옴. 디자인 스킬은 있으면 골라 씀(선택) |
 | 에이전트 ↔ 작업 연결 | 없음 | `start`가 준 marker로 연결, 없으면 "미연결" |
 | 이상 감지 | 없음 | 긴 단계(스케줄러), 멈춤·연속 실패·유령 슬롯(Mod). 경고만 하고 판단은 manager |
+| 처음 설정 | 사람이 TODO·테스트 설정·`.gitignore`·통합 브랜치를 준비 | 템플릿 + 설계 문서만 넣으면 manager가 준비하고 확인받는다 |
 | 필요한 것 | Claude Code | Claude Code 2.1.331에서 검증(Mods API는 early access) |
 
 고르는 법: Mods를 쓸 수 없거나 화면 없이 안정적인 엔진만 필요하면 `autonomous-parallel-dev`. 사용자가 대화하며 진행을 지켜보고 결정·검토를 자주 해야 하면 이 템플릿.
@@ -65,13 +68,15 @@ AI 도구의 소스·설정은 모두 `.claude/`에, 실행 중에 생기는 상
 Mod를 `.claude/mods/`가 아니라 `.claude/skills/`에 두는 것은 Claude Code가 프로젝트에서 자동으로 읽는 플러그인 위치가 `.claude/skills/<이름>/`뿐이어서다(`.claude/plugins/`도 읽지 않는다).
 
 ## 사용법
-1. `CLAUDE.md`와 `.claude/`를 프로젝트 루트에 복사해 커밋한다. TODO와 `verify.config.json`을 채운다.
-2. `.gitignore`에 `.claude/worktrees/`, `.claude/settings.local.json`을 넣는다(Mod의 `.claude-plugin/types/`는 엔진이 스스로 무시 파일을 둔다).
-3. 통합 브랜치를 만든다: `git switch -c integration`
-4. **저장소 루트에서** `claude --agent manager`로 연다. 처음이면 작업 폴더 신뢰를 승인한다. Mod는 `--plugin-dir` 없이 로드된다.
-5. `/plugin`의 Installed 탭에서 `autonomous-dashboard@skills-dir`가 켜졌는지 본다. 넓은 터미널(전체 화면 레이아웃)이면 Pane이 자동으로 열린다.
-6. 요구사항이나 설계 문서를 manager에게 준다. 진행은 Pane에서 보고, 결정·검토가 필요하면 manager가 묻는다.
-7. 끝나면 `integration`을 확인하고 `main`에 직접 반영한다.
+1. `CLAUDE.md`와 `.claude/`를 프로젝트 폴더에 복사하고, 설계·요구사항 문서를 넣는다(예: `docs/design.md`). git 저장소가 아니어도 된다(manager가 `git init`한다).
+2. **저장소 루트에서** `claude --agent manager`로 연다. 처음이면 작업 폴더 신뢰를 승인한다. Mod는 `--plugin-dir` 없이 로드된다
+   (`/plugin` Installed 탭에 `autonomous-dashboard@skills-dir`. 넓은 터미널이면 Pane이 자동으로 열린다).
+3. 설계 문서를 주고 진행을 맡긴다. 처음 한 번 manager가 **시작 준비**를 한다:
+   문서를 보고 `CLAUDE.md`의 TODO·`verify.config.json`(테스트 명령 등)·`.gitignore`를 채울 내용을 요약해 확인받고,
+   적용·커밋한 뒤 `integration` 브랜치를 만들고 `sched init`한다. `verify.config.json` 수정은 승인 창이 한 번 뜬다.
+
+그 뒤 진행은 Pane에서 보고, 결정·검토가 필요하면 manager가 묻는다. 끝나면 `integration`을 확인하고 `main`에 직접 반영한다.
+직접 채우고 싶으면 시작 전에 TODO·`verify.config.json`·`.gitignore`를 채우고 `git switch -c integration`해 두면 manager가 준비를 건너뛴다.
 
 Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"autonomous-dashboard@skills-dir": false}}`. 개발 기능은 그대로 돈다.
 한 세션만 다른 폴더의 Mod로 열려면 `claude --agent manager --plugin-dir ./.claude/skills/autonomous-dashboard`.
