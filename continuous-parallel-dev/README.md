@@ -7,6 +7,8 @@
 ```mermaid
 flowchart TD
     Q[("work-queue.md<br/>작업 대기열")] -->|"의존이 풀린 작업"| M["manager"]
+    M -.->|"필요할 때만"| RS["조사: Explore · researcher"]
+    RS -.->|"결론 · docs/"| M
     M -->|"빈자리마다 배정 · 최대 3명"| I["implementer<br/>각자 worktree"]
     I -->|"커밋하고 종료"| H{"SubagentStop Hook<br/>verify.py"}
     H -->|"FAIL"| I
@@ -38,6 +40,7 @@ CLAUDE.md                          규칙 (TODO 채우기)
 .claude/agents/manager.md          스케줄러 겸 팀장
 .claude/agents/implementer.md      worktree 구현자
 .claude/agents/verifier.md         읽기 전용 검증자
+.claude/agents/researcher.md       조사 담당 (선택, 결과를 docs/에 정리)
 ```
 
 ## 사용법

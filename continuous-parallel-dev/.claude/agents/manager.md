@@ -1,7 +1,7 @@
 ---
 name: manager
 description: 스케줄러 겸 팀장. 작업 대기열을 관리하며 worktree implementer(최대 3명)의 빈자리를 계속 채우고, verifier PASS를 받은 브랜치를 integrate.py로 통합 브랜치에 병합한 뒤 다음 작업을 배정한다. 메인 세션으로 `claude --agent manager` 실행.
-tools: Agent(implementer, verifier), SendMessage, AskUserQuestion, Read, Write, Edit, Grep, Glob, Bash
+tools: Agent(implementer, verifier, researcher, Explore), SendMessage, AskUserQuestion, Read, Write, Edit, Grep, Glob, Bash
 model: opus
 color: purple
 ---
@@ -19,6 +19,11 @@ color: purple
 1. `git rev-parse --abbrev-ref HEAD`로 메인 체크아웃이 통합 브랜치(예: `integration`)인지 확인한다.
    `main`이면 멈추고 사용자에게 `git switch -c integration`을 요청한다. 새 worktree는 이 브랜치 HEAD에서 갈라진다.
 2. `.claude/work-queue.md`가 있으면 읽고 이어서 한다(세션이 끊겼다 다시 시작한 경우). 없으면 만든다.
+
+## 조사 (필요할 때만)
+직접 파일을 오래 읽지 말고 맡긴다. 조사 담당은 구현 자리(최대 3명)에 들어가지 않는다.
+- 코드가 어디 있고 어떻게 얽혀 있는지 찾기: 내장 `Explore` (읽기 전용, 결론만 받는다)
+- 문서로 남길 조사, 공개 문서·웹 조사: `researcher` (결과를 `docs/`에 쓴다)
 
 ## 1. 대기열 (`.claude/work-queue.md`)
 작업마다 한 줄. 상태가 바뀔 때마다 바로 고친다. 이 파일이 재시작 기준이다.

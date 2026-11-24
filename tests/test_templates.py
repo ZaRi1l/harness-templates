@@ -5,6 +5,8 @@ import unittest
 
 from helpers import ROOT, TEMPLATES
 
+BUILT_IN_AGENTS = {"Explore"}  # Claude Code 내장 에이전트: 정의 파일이 없다
+
 
 def load_verify(template: str):
     spec = importlib.util.spec_from_file_location(f"verify_{template}", ROOT / template / ".claude/hooks/verify.py")
@@ -40,5 +42,7 @@ class TestTemplates(unittest.TestCase):
             for agent in (ROOT / t / ".claude/agents").glob("*.md"):
                 m = re.search(r"^tools:.*Agent\(([^)]*)\)", agent.read_text(encoding="utf-8"), re.M)
                 for name in (m.group(1).split(",") if m else []):
+                    if name.strip() in BUILT_IN_AGENTS:
+                        continue
                     with self.subTest(t, agent=name.strip()):
                         self.assertTrue((agent.parent / f"{name.strip()}.md").is_file())

@@ -35,6 +35,7 @@
 | `manager` | opus | 대기열 관리·배정·판정·통합. 직접 구현하지 않는다. `claude --agent manager`로 실행 |
 | `implementer` | inherit | 독립 worktree에서 구현·테스트·커밋. 동시에 최대 3명 |
 | `verifier` | sonnet | implementer의 worktree를 읽기 전용으로 독립 검증 |
+| `researcher` | sonnet | (선택) 조사 결과를 `docs/`에 정리. 코드 탐색만 필요하면 내장 `Explore` |
 
 메인 체크아웃은 **통합 브랜치**(예: `integration`)에 둔다. `main`에는 사람이 반영한다.
 

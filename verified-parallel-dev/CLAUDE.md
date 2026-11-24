@@ -32,6 +32,7 @@
 | `manager` | opus | 작업 분할·배정·판정. 직접 구현하지 않는다. `claude --agent manager`로 실행 |
 | `implementer` | inherit | 독립 worktree에서 구현·테스트·커밋. 동시에 최대 3명 |
 | `verifier` | sonnet | implementer의 worktree를 읽기 전용으로 독립 검증 |
+| `researcher` | sonnet | (선택) 조사 결과를 `docs/`에 정리. 코드 탐색만 필요하면 내장 `Explore` |
 
 작업 흐름:
 1. manager가 담당 경로가 겹치지 않게 작업을 나눠 implementer에게 배정한다.

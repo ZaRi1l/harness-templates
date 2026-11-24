@@ -15,6 +15,8 @@
 ```mermaid
 flowchart TD
     U["사용자: 할 일"] --> M["manager<br/>작업 분할 · 담당 경로 지정"]
+    M -.->|"필요할 때만"| RS["조사: Explore · researcher"]
+    RS -.->|"결론 · docs/"| M
     M -->|"isolation: worktree"| I1["implementer A"]
     M -->|"isolation: worktree"| I2["implementer B"]
     M -->|"isolation: worktree"| I3["implementer C"]
@@ -28,7 +30,7 @@ flowchart TD
     V -->|"PASS"| C["병합 후보"]
     C --> X["main 반영은 사용자"]
 ```
-자리가 비면 manager가 의존이 풀린 다음 작업을 바로 배정한다.
+실선은 필수 흐름, 점선은 필요할 때만 쓰는 조사 단계다. 자리가 비면 manager가 의존이 풀린 다음 작업을 바로 배정한다.
 
 ## 구성
 ```
@@ -40,6 +42,7 @@ CLAUDE.md                        프로젝트 규칙 템플릿 (TODO 채우기)
   agents/manager.md              팀장: 분할·배정·판정 (직접 구현 안 함)
   agents/implementer.md          구현자: worktree에서 구현·테스트·커밋
   agents/verifier.md             검증자: 읽기 전용 독립 검증
+  agents/researcher.md           조사 담당: 조사 결과를 docs/에 정리 (선택)
 ```
 
 ## 적용 방법
