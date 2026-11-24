@@ -1,0 +1,14 @@
+{
+    "_comment": "스케줄러·통합 설정. 키 설명은 README.md의 '설정' 절을 본다.",
+    "protected_branches": ["main", "master"],
+    "slots": {"research": 2, "design": 1, "preview": 2, "implement": 3, "verify": 2},
+    "max_retries": 3,
+    "verifiers_by_risk": {"low": 1, "medium": 1, "high": 2},
+    "profiles": {
+        "fast": {"research": false, "design": false, "verifiers": 1},
+        "standard": {"research": false, "design": false, "verifiers": 1},
+        "research": {"research": true, "design": false, "verifiers": 1},
+        "deep": {"research": true, "design": true, "verifiers": 2}
+    },
+    "integration_lock_stale_s": 7200
+}

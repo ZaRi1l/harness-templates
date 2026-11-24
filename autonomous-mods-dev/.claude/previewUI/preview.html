@@ -1,0 +1,142 @@
+<!doctype html>
+<!--
+  미리보기 대시보드의 화면 소스. `sched.py dashboard`가 아래 auto-data 스크립트 블록에 스냅샷 JSON을 넣어
+  <git common dir>/claude-auto/previews/index.html 로 기록한다. 이 파일을 고치면 다음 dashboard부터 반영된다.
+  읽기 전용 페이지다: 승인·수정 요청·결정은 CLI, manager, /autonomous 화면에서만 기록한다.
+  사용자 문자열은 textContent로만 넣는다(innerHTML 금지). 미리보기는 sandbox iframe으로만 띄운다.
+-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Development Preview</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --soft: #8881; --accent: #c15f3c; --warn: #b7791f; --ok: #2f855a; }
+  body { font-family: system-ui, sans-serif; max-width: 76rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; }
+  h1 { margin-bottom: .2rem; } h2 { margin-top: 2rem; border-bottom: 1px solid var(--line); padding-bottom: .2rem; }
+  section { border: 1px solid var(--line); border-radius: 8px; padding: .6rem 1rem; margin: 1rem 0; }
+  section.wait { border-left: 4px solid var(--warn); }
+  .s { font-size: .8rem; background: var(--soft); border-radius: 4px; padding: .1rem .4rem; margin-left: .3rem; }
+  .muted { opacity: .7; } .ok { color: var(--ok); } .rec { color: var(--ok); font-weight: 600; }
+  pre { background: var(--soft); padding: .5rem; overflow: auto; } code { font-size: .85em; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid var(--line); padding: .3rem .6rem; text-align: left; vertical-align: top; }
+  iframe { border: 1px solid var(--line); border-radius: 6px; background: #fff; height: 34rem; width: 100%; display: block; }
+  .pair { display: flex; gap: .5rem; } .pair > div { flex: 1; min-width: 0; }
+  .bar button, .bar a { margin-right: .4rem; }
+  #q { width: 100%; padding: .45rem; font-size: 1rem; margin: .6rem 0; box-sizing: border-box; }
+  .hide { display: none; }
+  @media (max-width: 700px) { .pair { flex-direction: column; } }
+</style>
+</head>
+<body>
+<h1>Development Preview</h1>
+<p id="meta" class="muted"></p>
+<p>이 페이지는 읽기 전용이다. 승인·수정 요청·결정은 아래 명령을 터미널에서 실행하거나 manager 또는
+<code>/autonomous</code> 화면에서 한다. 명령에는 사용자가 본 버전과 해시가 들어 있어, 그 사이 새 버전이 등록되면 거부된다.</p>
+<input id="q" placeholder="작업 ID·제목·상태로 찾기" aria-label="찾기">
+<h2>미리보기</h2><div id="previews"></div>
+<h2>사용자 결정</h2><div id="decisions"></div>
+<h2>전체 작업</h2>
+<table><thead><tr><th>ID</th><th>상태</th><th>작업</th><th>의존</th><th>재시도</th></tr></thead><tbody id="tasks"></tbody></table>
+
+<script id="auto-data" type="application/json">__AUTO_DATA__</script>
+<script>
+(() => {
+  const data = JSON.parse(document.getElementById('auto-data').textContent)
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag)
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'class') n.className = v
+      else if (k === 'find') n.dataset.find = v
+      else n.setAttribute(k, v)
+    }
+    for (const k of kids) if (k !== null && k !== undefined) n.append(k instanceof Node ? k : document.createTextNode(String(k)))
+    return n
+  }
+  const frame = (src, title) => el('iframe', { sandbox: 'allow-scripts', src, title, referrerpolicy: 'no-referrer' })
+
+  document.getElementById('meta').textContent =
+    `생성 ${data.generated_at} · 검토 대기 ${data.awaiting}건 · 결정 대기 ${data.decisions_open}건 · 새로 고치려면 ${data.script} dashboard`
+
+  const previews = document.getElementById('previews')
+  if (!data.previews.length) previews.append(el('p', { class: 'muted' }, '미리보기가 필요한 작업이 없다.'))
+  for (const t of data.previews) {
+    const sec = el('section', { class: t.state === 'AWAITING_APPROVAL' ? 'wait' : '', find: `${t.id} ${t.title} ${t.state}` },
+      el('h3', {}, `${t.id} · ${t.title}`, el('span', { class: 's' }, t.state)))
+    const list = el('ul')
+    for (const v of t.versions) {
+      list.append(el('li', {}, el('a', { href: v.href, target: '_blank', rel: 'noopener' }, `v${v.n}`), ' ',
+        el('code', {}, v.sha.slice(0, 12)), v.n === t.approved ? el('span', { class: 'ok' }, ' ✅ 승인') : null,
+        v.summary ? ` — ${v.summary}` : null))
+    }
+    sec.append(t.versions.length ? list : el('p', { class: 'muted' }, '미리보기 없음'))
+    if (t.feedback.length) {
+      const fb = el('ul')
+      for (const f of t.feedback) fb.append(el('li', {}, `수정 요청(v${f.on}): ${f.text}`))
+      sec.append(fb)
+    }
+    if (t.commands.length) sec.append(el('pre', {}, t.commands.join('\n')))
+    if (t.versions.length) {
+      const last = t.versions[t.versions.length - 1]
+      const id = `f-${t.id}`
+      const view = frame(last.href, `${t.id} 미리보기`)
+      view.id = id
+      const sizes = el('p', { class: 'bar' })
+      for (const [label, w] of [['Desktop', '100%'], ['Tablet', '768px'], ['Mobile', '375px']]) {
+        const b = el('button', { type: 'button' }, label)
+        b.addEventListener('click', () => { view.style.width = w })
+        sizes.append(b)
+      }
+      sizes.append(el('a', { href: last.href, target: '_blank', rel: 'noopener' }, '전체 화면'))
+      sec.append(el('details', { open: '' }, el('summary', {}, `v${last.n} 보기`), sizes, view))
+      if (t.versions.length > 1) {
+        const pair = el('div', { class: 'pair' })
+        for (const pick of [t.versions[t.versions.length - 2], last]) {
+          const f = frame(pick.href, `${t.id} 비교`)
+          const sel = el('select', { 'aria-label': '비교할 버전' })
+          for (const v of t.versions) {
+            const o = el('option', { value: v.href }, `v${v.n}`)
+            if (v.n === pick.n) o.selected = true
+            sel.append(o)
+          }
+          sel.addEventListener('change', () => { f.src = sel.value })
+          pair.append(el('div', {}, sel, f))
+        }
+        sec.append(el('details', {}, el('summary', {}, '버전 비교'), pair))
+      }
+    }
+    previews.append(sec)
+  }
+
+  const decisions = document.getElementById('decisions')
+  if (!data.decisions.length) decisions.append(el('p', { class: 'muted' }, '기록된 결정이 없다.'))
+  for (const d of data.decisions) {
+    const sec = el('section', { class: d.state === 'OPEN' ? 'wait' : '', find: `${d.id} ${d.title} ${d.tasks.join(' ')}` },
+      el('h3', {}, `${d.id} · ${d.title}`, el('span', { class: 's' }, d.state)),
+      el('p', {}, d.question, el('span', { class: 'muted' }, ` — 작업 ${d.tasks.join(', ') || '-'}`)))
+    const ul = el('ul')
+    for (const o of d.options) {
+      ul.append(el('li', {}, el('b', {}, o.key), ` ${o.label}`, o.pros ? ` · 장점: ${o.pros}` : null,
+        o.cons ? ` · 단점: ${o.cons}` : null, o.key === d.recommend ? el('span', { class: 'rec' }, ' ★ 추천') : null))
+    }
+    sec.append(ul, el('p', {}, `추천 이유: ${d.why || '없음'}`))
+    if (d.state === 'ANSWERED') sec.append(el('p', {}, `응답: ${d.choice} (${d.by}, ${d.answered_at}) ${d.note || ''}`))
+    else if (d.state === 'OPEN') sec.append(el('pre', {}, `${data.script} decide answer ${d.id} --choice <선택지>`))
+    decisions.append(sec)
+  }
+
+  const rows = document.getElementById('tasks')
+  for (const t of data.tasks) {
+    rows.append(el('tr', { find: `${t.id} ${t.title} ${t.state}` },
+      el('td', {}, t.id), el('td', {}, t.state), el('td', {}, t.title), el('td', {}, t.deps.join(', ')), el('td', {}, t.retries)))
+  }
+
+  document.getElementById('q').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase()
+    document.querySelectorAll('[data-find]').forEach(n => n.classList.toggle('hide', !n.dataset.find.toLowerCase().includes(q)))
+  })
+})()
+</script>
+</body>
+</html>
