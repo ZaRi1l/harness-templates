@@ -1,11 +1,10 @@
 // 순수 함수만 둔다: 입력이 같으면 결과가 같고, $·파일·프로세스를 만지지 않는다. 테스트는 이 파일을 직접 검사한다.
-import type { Activity, Anomaly, Decision, Layout, QueueFilter, Run, SnapMeta, SnapTask, Snapshot, Tab, View } from '../types'
+import type { Activity, Anomaly, Decision, Layout, QueueFilter, Run, SnapMeta, SnapTask, Snapshot, Tab, TaskMode, View } from '../types'
 
 export const SCHEMA_VERSION = 1
-export const TABS: readonly Tab[] = ['overview', 'agents', 'queue', 'timeline', 'git', 'decisions', 'metrics', 'errors']
+export const TABS: readonly Tab[] = ['overview', 'tasks', 'agents', 'decisions', 'git', 'activity', 'commands']
 export const TAB_LABEL: Record<Tab, string> = {
-  overview: '전체', agents: '에이전트', queue: '대기열', timeline: '타임라인', git: 'Git·통합',
-  decisions: '미리보기·결정', metrics: '지표', errors: '활동·오류',
+  overview: '현황', tasks: '작업', agents: '에이전트', decisions: '승인·결정', git: '통합·지표', activity: '활동', commands: '명령',
 }
 export const FILTERS: readonly QueueFilter[] = ['all', 'active', 'waiting', 'blocked', 'done']
 export const FILTER_LABEL: Record<QueueFilter, string> = { all: '전체', active: '진행', waiting: '대기', blocked: '보류', done: '완료' }
@@ -13,8 +12,8 @@ export const POOLS = ['research', 'design', 'preview', 'implement'] as const
 export const POOL_LABEL: Record<string, string> = {
   research: '조사', design: '설계', preview: '미리보기', implement: '구현', verify: '검증', merge: '통합',
 }
-export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, filter: 'all', expanded: null, errorsOnly: false, lastAction: null }
-export const EMPTY_META: SnapMeta = { root: null, stateDir: null, readAtMs: 0, mtimeMs: 0, error: null, stale: false }
+export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, filter: 'all', taskMode: 'list', expanded: null, errorsOnly: false, lastAction: null }
+export const EMPTY_META: SnapMeta = { root: null, stateDir: null, readAtMs: 0, checkedMs: 0, mtimeMs: 0, error: null, stale: false }
 
 export type Tone = 'ok' | 'warn' | 'err' | 'dim' | 'accent' | 'info' | 'plain'
 export type Seg = { text: string; tone?: Tone; bold?: boolean }
@@ -60,6 +59,7 @@ export const normalizeView = (v: unknown): View => {
     tab: TABS.includes(x.tab as Tab) ? (x.tab as Tab) : 'overview',
     layout: (['auto', 'mini', 'compact', 'wide'] as const).includes(x.layout as Layout) ? (x.layout as Layout) : null,
     filter: FILTERS.includes(x.filter as QueueFilter) ? (x.filter as QueueFilter) : 'all',
+    taskMode: x.taskMode === 'timeline' ? 'timeline' : 'list',
     expanded: typeof x.expanded === 'string' ? x.expanded : null,
     errorsOnly: x.errorsOnly === true,
     lastAction: typeof x.lastAction === 'string' ? x.lastAction : null,
@@ -209,7 +209,7 @@ export const short = (sha: string | null | undefined, n = 7) => (sha ? sha.slice
 export type Action =
   | { kind: 'open' }
   | { kind: 'close' }
-  | { kind: 'tab'; tab: Tab }
+  | { kind: 'tab'; tab: Tab; mode: TaskMode | null }
   | { kind: 'refresh' }
   | { kind: 'layout'; layout: Layout }
   | { kind: 'preview'; task: string | null; version: number | null }
@@ -223,9 +223,10 @@ export type Action =
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
-const TAB_WORDS: Record<string, Tab> = {
-  status: 'overview', overview: 'overview', agents: 'agents', queue: 'queue', timeline: 'timeline', git: 'git',
-  decisions: 'decisions', metrics: 'metrics', errors: 'errors', activity: 'errors',
+const TAB_WORDS: Record<string, [Tab, TaskMode | null]> = {
+  status: ['overview', null], overview: ['overview', null], tasks: ['tasks', null], queue: ['tasks', 'list'],
+  timeline: ['tasks', 'timeline'], agents: ['agents', null], decisions: ['decisions', null], git: ['git', null],
+  metrics: ['git', null], errors: ['activity', null], activity: ['activity', null], commands: ['commands', null],
 }
 const version = (w: string | undefined) => {
   if (w === undefined) return null
@@ -237,7 +238,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
 export const HELP = [
   '/autonomous                       관제 Pane 열기 (open과 같다)',
   '/autonomous close                 Pane만 닫는다. 개발은 계속된다',
-  '/autonomous status|agents|queue|timeline|git|decisions|metrics|errors   해당 탭',
+  '/autonomous status|tasks|agents|decisions|git|activity|commands   해당 탭 (queue·timeline·metrics·errors도 된다)',
   '/autonomous preview [ID [vN]]     브라우저로 미리보기 대시보드 / 작업의 최신·특정 버전 열기',
   '/autonomous refresh               스냅샷을 다시 만들고 읽는다',
   '/autonomous layout auto|mini|compact|wide',
@@ -255,7 +256,8 @@ export const parseCommand = (args: string): Action => {
   if (head === 'close') return { kind: 'close' }
   if (head === 'help') return { kind: 'help' }
   if (head === 'refresh') return { kind: 'refresh' }
-  if (TAB_WORDS[head]) return { kind: 'tab', tab: TAB_WORDS[head] }
+  const tw = TAB_WORDS[head]
+  if (tw) return { kind: 'tab', tab: tw[0], mode: tw[1] }
   if (head === 'layout') {
     const l = rest[0] as Layout
     return ['auto', 'mini', 'compact', 'wide'].includes(l) ? { kind: 'layout', layout: l } : { kind: 'error', message: 'layout은 auto|mini|compact|wide다' }
@@ -419,20 +421,19 @@ export const progress = (snap: Snapshot) => {
   return { done: snap.completed, of: live, pct: live ? Math.round((snap.completed / live) * 100) : null }
 }
 
+/** 상태 줄 한 줄. 기호만 쓰지 않고 낱말로 쓴다(기호만으로는 뜻을 알기 어렵다). */
 export const statusText = (snap: Snapshot | null, meta: SnapMeta, runs: Run[], warns: Anomaly[] = []) => {
-  if (!snap) return meta.error ? `auto ! ${fit(meta.error, 40)}` : 'auto 상태 없음'
+  if (!snap) return meta.error ? `자율 · ${fit(meta.error, 40)}` : '자율 · 상태 없음'
   const p = progress(snap)
   const blocked = snap.counts.BLOCKED ?? 0
-  const parts = [
-    `auto ✓${p.done}/${p.of}`,
-    `●${runningRuns(runs).length}/${slotUsed(snap)}`,
-    `?${awaiting(snap).length + openDecisions(snap).length}`,
-  ]
-  if (blocked) parts.push(`✗${blocked}`)
-  if (warns.length) parts.push(`⚠${warns.length}`)
-  if (snap.paused) parts.push('⏸')
-  if (meta.stale) parts.push('stale')
-  return parts.join(' ')
+  const parts = [`자율 완료 ${p.done}/${p.of}`, `실행 ${runningRuns(runs).length}/배정 ${slotUsed(snap)}`]
+  const wait = awaiting(snap).length + openDecisions(snap).length
+  if (wait) parts.push(`답 필요 ${wait}`)
+  if (blocked) parts.push(`보류 ${blocked}`)
+  if (warns.length) parts.push(`경고 ${warns.length}`)
+  if (snap.paused) parts.push('일시 중지')
+  if (meta.stale) parts.push('갱신 실패')
+  return parts.join(' · ')
 }
 
 /** 지금 무엇이 흐름을 막는지. 스냅샷의 숫자만으로 정한다(추측하지 않는다). */
@@ -510,65 +511,133 @@ export const pushActivity = (list: Activity[], items: Activity[], max: number) =
 const head = (text: string): Line => [{ text, tone: 'accent', bold: true }]
 const kv = (k: string, v: string, tone: Tone = 'plain'): Line => [{ text: `${k} `, tone: 'dim' }, { text: v, tone }]
 
-export const overviewLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: number, warns: Anomaly[] = []): Line[] => {
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+/** `── 제목 ─────` 구분선. */
+export const section = (title: string, width: number): Line => [
+  { text: `── ${title} `, tone: 'accent', bold: true },
+  { text: '─'.repeat(Math.max(0, width - strWidth(title) - 4)), tone: 'dim' },
+]
+export const rule = (width: number): Line => [{ text: '─'.repeat(Math.max(0, width)), tone: 'dim' }]
+export const bar = (done: number, of: number, cells: number) => {
+  const n = of ? Math.min(cells, Math.round((done / of) * cells)) : 0
+  return '█'.repeat(n) + '░'.repeat(cells - n)
+}
+/** 폭에 맞춰 낱말 단위로 여러 줄로 나눈다(한 낱말이 폭보다 길면 자른다). 넘치면 마지막 줄 끝에 …를 붙인다. */
+export const wrapText = (s: string, w: number, maxLines: number): string[] => {
+  const width = Math.max(4, w)
+  const out: string[] = []
+  let cur = ''
+  for (let word of s.split(/\s+/).filter(Boolean)) {
+    const next = cur ? `${cur} ${word}` : word
+    if (strWidth(next) <= width) {
+      cur = next
+      continue
+    }
+    if (cur) out.push(cur)
+    while (strWidth(word) > width) {
+      const head = fit(word, width + 1).slice(0, -1) // …를 붙이지 않고 폭만큼 자른다
+      out.push(head)
+      word = word.slice(head.length)
+    }
+    cur = word
+  }
+  if (cur) out.push(cur)
+  if (out.length <= maxLines) return out
+  const kept = out.slice(0, maxLines)
+  kept[maxLines - 1] = fit(`${kept[maxLines - 1]}${out[maxLines]}`, width)
+  return kept
+}
+
+/**
+ * 모든 탭 위에 놓는 머리말. 오른쪽 위 회전 표시는 Mod가 스냅샷 파일을 확인할 때마다 한 칸 돈다.
+ * 숫자가 그대로여도 표시가 돌면 자동 갱신이 살아 있다는 뜻이다.
+ */
+export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: number, warns: Anomaly[], width: number, refreshMs: number): Line[] => {
   const p = progress(snap)
-  const live = runningRuns(runs).length
-  const lines: Line[] = [
-    kv('프로젝트', `${snap.project.name} · ${snap.integration.branch ?? '통합 브랜치 없음(sched init)'} @ ${short(snap.integration.head)}`),
-    [
-      { text: '완료 ', tone: 'dim' },
-      { text: `${p.done}/${p.of}`, tone: 'ok', bold: true },
-      { text: p.pct === null ? '' : ` (${p.pct}%, 작업 수 기준)`, tone: 'dim' },
-    ],
-  ]
-  const phase = (label: string, states: string[]) => [label, states.reduce((n, s) => n + (snap.counts[s] ?? 0), 0)] as const
-  const phases = [
-    phase('조사', ['RESEARCHING']), phase('설계', ['DESIGNING']), phase('미리보기', ['PREVIEWING']),
-    phase('승인대기', ['AWAITING_APPROVAL']), phase('준비', ['READY', 'PENDING']), phase('구현', ['IMPLEMENTING', 'RETRY']),
-    phase('검증', ['VERIFYING']), phase('통합', ['READY_TO_MERGE', 'MERGING']), phase('보류', ['BLOCKED']),
-  ]
-  lines.push([{ text: phases.map(([l, n]) => `${l} ${n}`).join(' · ') }])
+  const live: Seg = meta.stale
+    ? { text: '✗ 갱신 실패', tone: 'err', bold: true }
+    : { text: `${SPIN[Math.floor(meta.checkedMs / Math.max(1, refreshMs)) % SPIN.length]} 실시간 · 변화 ${ago(ms(snap.generated_at), now)}`, tone: 'ok' }
+  const left = fitLine(
+    [{ text: 'AUTONOMOUS ', tone: 'accent', bold: true }, { text: `${snap.project.name} · ${snap.integration.branch ?? '통합 브랜치 없음'} ${short(snap.integration.head)}`, tone: 'dim' }],
+    Math.max(0, width - strWidth(live.text) - 1),
+  )
+  const lines: Line[] = [[...left, { text: ' '.repeat(Math.max(1, width - lineWidth(left) - strWidth(live.text))) }, live]]
   lines.push([
-    { text: '슬롯 ', tone: 'dim' },
-    { text: POOLS.map(pl => `${POOL_LABEL[pl]} ${snap.slots[pl]?.used ?? 0}/${snap.slots[pl]?.limit ?? '?'}`).join(' · ') },
-    { text: ` · 검증 대기 ${snap.slots.verify?.queued ?? 0}(한도 ${snap.slots.verify?.limit ?? '?'})` },
+    { text: '진행 ', tone: 'dim' },
+    { text: bar(p.done, p.of, 14), tone: 'ok' },
+    { text: ` ${p.done}/${p.of} 완료`, bold: true },
+    { text: p.pct === null ? '' : ` ${p.pct}% (작업 수 기준)`, tone: 'dim' },
   ])
   const missing = unobservedHolders(snap, runs).length
   lines.push([
-    { text: '실행 중 에이전트(관측) ', tone: 'dim' },
-    { text: String(live), bold: true },
-    { text: ` · 슬롯 점유(스케줄러) ${slotUsed(snap)}`, tone: 'dim' },
+    { text: `실행 ${runningRuns(runs).length} · 배정 ${slotUsed(snap)} · 검증 ${snap.counts.VERIFYING ?? 0} · 통합 대기 ${snap.counts.READY_TO_MERGE ?? 0}`, tone: 'dim' },
     ...(missing ? [{ text: ` · 실행 미확인 ${missing}`, tone: 'warn' as Tone }] : []),
   ])
   const wait = awaiting(snap).length
   const dec = openDecisions(snap).length
-  if (wait || dec) lines.push([{ text: `? 사용자 차례: 미리보기 ${wait}건 · 결정 ${dec}건 → /autonomous decisions`, tone: 'warn', bold: true }])
-  if (snap.paused) lines.push([{ text: `⏸ 새 배정 일시 중지 (${snap.paused.reason})`, tone: 'warn' }])
-  if (warns.length) {
-    lines.push(head('⚠ 경고 (숫자로 판정, 원인은 manager가 확인)'))
-    for (const w of warns.slice(0, 6)) lines.push([{ text: `⚠ ${w.text}`, tone: 'warn' }])
-  }
-  const b = bottlenecks(snap)
-  lines.push(head('병목'))
-  lines.push(...(b.length ? b.map(x => [{ text: `- ${x}` }]) : [[{ text: '- 없음', tone: 'dim' as Tone }]]))
-  const note = snap.notes[snap.notes.length - 1]
-  if (note) {
-    lines.push(head('manager 설명'))
-    lines.push([{ text: `[${note.kind}] `, tone: 'dim' }, { text: note.text }, { text: note.task ? ` (${note.task})` : '', tone: 'dim' }])
-  }
-  lines.push(head('최근 상태 변화'))
-  for (const ev of snap.events.slice(-5).reverse()) {
-    const m = mark(ev.to)
-    lines.push([{ text: `${m.mark} `, tone: m.tone }, { text: `${ev.task} ${ev.from}→${ev.to} ` }, { text: fit(ev.reason ?? '', 50), tone: 'dim' }])
-  }
-  lines.push(freshness(snap, meta, now))
-  return lines
+  if (wait || dec) lines.push([{ text: `▶ 사용자 차례: 미리보기 승인 ${wait} · 결정 ${dec}`, tone: 'warn', bold: true }, { text: '  → 4 승인·결정 탭', tone: 'dim' }])
+  if (snap.paused) lines.push([{ text: `⏸ 새 배정 일시 중지: ${snap.paused.reason}`, tone: 'warn' }, { text: '  → 7 명령 탭에서 재개', tone: 'dim' }])
+  const blocked = snap.counts.BLOCKED ?? 0
+  if (blocked) lines.push([{ text: `✗ 보류 ${blocked}건`, tone: 'err', bold: true }, { text: '  → 2 작업 탭', tone: 'dim' }])
+  for (const w of warns.slice(0, 2)) lines.push([{ text: `⚠ ${w.text}`, tone: 'warn' }])
+  if (warns.length > 2) lines.push([{ text: `⚠ 외 ${warns.length - 2}건 → 6 활동 탭`, tone: 'warn' }])
+  if (meta.stale) lines.push([{ text: `✗ ${meta.error ?? '스냅샷 읽기 실패'} (이전 화면을 보이는 중)`, tone: 'err' }])
+  return [...lines.map(l => fitLine(l, width)), rule(width)]
 }
 
-export const freshness = (snap: Snapshot, meta: SnapMeta, now: number): Line => [
-  { text: `스냅샷 ${ago(ms(snap.generated_at), now)} 생성`, tone: 'dim' },
-  ...(meta.stale ? [{ text: ` · stale: ${meta.error ?? '읽기 실패'}`, tone: 'err' as Tone }] : []),
-]
+const ORDER: Record<string, number> = { IMPLEMENTING: 0, RETRY: 0, VERIFYING: 1, MERGING: 1, READY_TO_MERGE: 1, PREVIEWING: 2, DESIGNING: 2, RESEARCHING: 2, AWAITING_APPROVAL: 3, BLOCKED: 4, READY: 5, PENDING: 6, COMPLETED: 7 }
+
+/** 현황 탭: 작업 표, manager 설명, 병목, 최근 변화. 숫자 요약은 머리말에 있다. */
+export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: number): Line[] => {
+  const lines: Line[] = [section('작업', width)]
+  const tasks = snap.tasks.filter(t => t.state !== 'CANCELLED').sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9) || b.priority - a.priority)
+  if (!tasks.length) lines.push([{ text: '등록된 작업이 없다. manager가 sched add로 등록한다', tone: 'dim' }])
+  const titleW = Math.max(8, width - 2 - 9 - 9 - 22)
+  for (const t of tasks.slice(0, 8)) {
+    const m = mark(t.state)
+    const r = runningRuns(runs).find(x => x.task === t.id)
+    const latest = t.preview.versions[t.preview.versions.length - 1]
+    const who = r
+      ? `${r.role} · ${fmtDur(now - r.startedMs)}`
+      : t.decisions_open.length ? `결정 대기 ${t.decisions_open.join(',')}`
+      : t.state === 'AWAITING_APPROVAL' && latest ? `v${latest.n} 검토 대기`
+      : RUNNING_STATES[t.state] ? '실행 안 보임'
+      : t.state === 'BLOCKED' ? fit(t.reason, 22)
+      : t.state === 'COMPLETED' ? ''
+      : t.runnable ? '시작 가능' : fit(t.waiting ?? '', 22)
+    const whoTone: Tone = r ? 'accent' : RUNNING_STATES[t.state] || t.state === 'BLOCKED' ? 'warn' : 'dim'
+    lines.push([
+      { text: `${m.mark} `, tone: m.tone },
+      { text: `${pad(t.id, 8)} `, bold: true },
+      { text: `${pad(m.label, 8)} `, tone: m.tone },
+      { text: `${pad(t.title, titleW)} `, tone: t.state === 'COMPLETED' ? 'dim' : 'plain' },
+      { text: who, tone: whoTone },
+    ])
+  }
+  if (tasks.length > 8) lines.push([{ text: `  외 ${tasks.length - 8}개 → 2 작업 탭`, tone: 'dim' }])
+  const note = snap.notes[snap.notes.length - 1]
+  if (note) {
+    lines.push(section(`manager · ${note.kind}${note.task ? ` · ${note.task}` : ''}`, width))
+    for (const t of wrapText(note.text, width, 3)) lines.push([{ text: t }])
+  }
+  const b = bottlenecks(snap)
+  if (b.length) {
+    lines.push(section('병목', width))
+    for (const x of b) lines.push([{ text: `· ${x}`, tone: 'warn' }])
+  }
+  if (snap.events.length) {
+    lines.push(section('최근 변화', width))
+    for (const ev of snap.events.slice(-3).reverse()) {
+      const m = mark(ev.to)
+      lines.push([
+        { text: `${m.mark} `, tone: m.tone },
+        { text: `${ev.task} ${mark(ev.from).label}→${m.label} `, bold: true },
+        { text: `${ago(ms(ev.at), now)}${ev.reason ? ` · ${ev.reason}` : ''}`, tone: 'dim' },
+      ])
+    }
+  }
+  return lines.map(l => fitLine(l, width))
+}
 
 /** 대기열 행. id가 있는 행은 작업의 첫 줄이라 눌러서 펼칠 수 있다. */
 export type Row = { line: Line; id?: string }
@@ -623,7 +692,7 @@ const clamp = (v: unknown, lo: number, hi: number, d: number) => (typeof v === '
 export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => ({
   openOnStart: o.openOnStart !== false,
   layout: (['auto', 'mini', 'compact', 'wide'] as const).includes(o.layout as Layout) ? (o.layout as Layout) : 'auto',
-  paneColumns: clamp(o.paneColumns, 40, 200, 72),
+  paneColumns: clamp(o.paneColumns, 40, 200, 90),
   refreshMs: clamp(o.refreshSeconds, 1, 30, 2) * 1000,
   allowActions: o.allowActions !== false,
   toolDetail: o.toolDetail === 'masked' ? 'masked' : 'names',

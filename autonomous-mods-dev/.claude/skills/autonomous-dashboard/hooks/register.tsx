@@ -12,10 +12,10 @@ const TITLE = 'Autonomous'
 
 // 저장한 값의 모양을 바꾸면 shape 태그를 올린다. 예전 모양은 초기값으로 읽힌다.
 const snapA = atom({ plugin: 'autonomous-dashboard', key: 'snap' } as const, null as Snapshot | null, { shape: 'snap-1' })
-const metaA = atom({ plugin: 'autonomous-dashboard', key: 'meta' } as const, C.EMPTY_META, { shape: 'meta-1' })
+const metaA = atom({ plugin: 'autonomous-dashboard', key: 'meta' } as const, C.EMPTY_META, { shape: 'meta-2' })
 const runsA = atom({ plugin: 'autonomous-dashboard', key: 'runs' } as const, [] as Run[], { shape: 'runs-2' })
 const activityA = atom({ plugin: 'autonomous-dashboard', key: 'activity' } as const, [] as Activity[], { shape: 'activity-1' })
-const viewA = atom({ plugin: 'autonomous-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-1' })
+const viewA = atom({ plugin: 'autonomous-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-2' })
 const usageA = atom({ plugin: 'autonomous-dashboard', key: 'usage' } as const, { costUsd: null, contextPct: null } as Usage, { shape: 'usage-1' })
 
 const TONE_COLOR: Record<C.Tone, string | undefined> = {
@@ -56,8 +56,10 @@ async function flush($: EngineInterface) {
 
 /** git 없이 파일만으로 공통 git 폴더를 찾는다: 위로 올라가며 `.git` 폴더, 또는 worktree의 `.git` 파일 → commondir. */
 async function commonDirFromFiles($: EngineInterface, start: string): Promise<string | null> {
-  let dir: string | null = C.joinPath(start, '.')
-  for (let i = 0; dir && i < 64; i++, dir = C.parentDir(dir)) {
+  let next: string | null = C.joinPath(start, '.')
+  for (let i = 0; next && i < 64; i++) {
+    const dir: string = next
+    next = C.parentDir(dir)
     const dotgit = `${dir === '/' || dir.endsWith('/') ? dir : `${dir}/`}.git`
     const st = await $.fs.stat(dotgit).catch(() => null)
     if (!st) continue
@@ -100,6 +102,7 @@ async function poll($: EngineInterface, force = false) {
     const m = await read($, metaA)
     if (!m.stateDir) return
     const now = await $.clock.now()
+    await update($, metaA, x => ({ ...x, checkedMs: now })) // 바뀐 것이 없어도 확인했다는 표시(화면의 실시간 표시가 돈다)
     const file = `${m.stateDir}/dashboard.json`
     const [st, errSt] = await Promise.all([
       $.fs.stat(file).catch(() => null),
@@ -254,6 +257,13 @@ async function openPreview($: EngineInterface, task: string | null, version: num
   return `${target.label}을(를) 기본 브라우저로 열었다: ${file.realPath}`
 }
 
+/** 저장소를 다시 찾고 sched.py로 스냅샷을 새로 만든다. 작업 상태는 바꾸지 않는다. */
+async function refreshNow($: EngineInterface) {
+  await discover($)
+  const r = await runSched($, ['snapshot'])
+  return r.ok ? '스냅샷을 다시 만들고 읽었다' : `스냅샷을 만들지 못했다: ${r.text}`
+}
+
 async function openPane($: EngineInterface) {
   return $.ui.open({ id: PANE, title: TITLE, columns: cfg.paneColumns, rows: 12 })
 }
@@ -376,17 +386,14 @@ export const register: Register = (on, options) => {
         await $.ui.close({ id: PANE })
         return say('관제 Pane을 닫았다. 개발 작업은 계속된다')
       case 'tab':
-        await setView($, v => ({ ...v, tab: a.tab }))
+        await setView($, v => ({ ...v, tab: a.tab, ...(a.mode ? { taskMode: a.mode } : {}) }))
         await openPane($)
         return say(`${C.TAB_LABEL[a.tab]} 탭`)
       case 'layout':
         await setView($, v => ({ ...v, layout: a.layout }))
         return say(`레이아웃: ${a.layout}`)
-      case 'refresh': {
-        await discover($)
-        const r = await runSched($, ['snapshot'])
-        return say(r.ok ? '스냅샷을 다시 만들고 읽었다' : `스냅샷을 만들지 못했다: ${r.text}`)
-      }
+      case 'refresh':
+        return say(await refreshNow($))
       case 'preview':
         return say(await openPreview($, a.task, a.version))
       default:
@@ -429,41 +436,86 @@ export const register: Register = (on, options) => {
     const warns = C.anomalies(snap, runs, now, cfg.stallMs)
     if (layout === 'mini') return <Box flexDirection="column" width={W}>{lines(C.miniLines(snap, meta, runs, W, warns))}</Box>
 
+    const say = (text: string) => setView($, v => ({ ...v, lastAction: `ℹ ${C.fit(text, 100)}` }))
+    const userWait = C.awaiting(snap).length + C.openDecisions(snap).length
     const tabs = (
       <Box flexWrap="wrap" columnGap={1}>
-        {C.TABS.map((t, i) => (
-          <Button
-            key={`tab-${t}`}
-            plain
-            hotkey={String(i + 1)}
-            variant={view.tab === t ? 'primary' : undefined}
-            onPress={() => setView($, v => ({ ...v, tab: t as Tab }))}
-          >
-            <Text bold={view.tab === t} inverse={view.tab === t}>{C.TAB_LABEL[t]}</Text>
-          </Button>
-        ))}
+        {C.TABS.map((t, i) => {
+          const active = view.tab === t
+          const badge = t === 'decisions' && userWait ? ` ${userWait}` : ''
+          return (
+            <Button key={`tab-${t}`} plain hotkey={String(i + 1)} onPress={() => setView($, v => ({ ...v, tab: t as Tab }))}>
+              <Text bold={active} inverse={active} color={active ? 'claude' : badge ? 'warning' : undefined} dimColor={!active && !badge}>{` ${i + 1} ${C.TAB_LABEL[t]}${badge} `}</Text>
+            </Button>
+          )
+        })}
       </Box>
     )
 
-    const slotControls = can ? (
-      <Box flexWrap="wrap" columnGap={1}>
-        {[...C.POOLS, 'verify'].map(pool => {
-          const s = snap.slots[pool]
-          return (
-            <Box key={`slot-${pool}`} columnGap={0}>
-              <Text dimColor>{C.POOL_LABEL[pool]} {s?.limit ?? '?'}</Text>
-              <Button key={`dec-${pool}`} label="-" plain onPress={() => act($, { kind: 'limit', pool, n: Math.max(1, (s?.limit ?? 1) - 1) })} />
-              <Button key={`inc-${pool}`} label="+" plain onPress={() => act($, { kind: 'limit', pool, n: Math.min(16, (s?.limit ?? 1) + 1) })} />
+    const LAYOUT_LABEL: Record<string, string> = { auto: '자동', compact: '좁게', wide: '넓게', mini: '요약' }
+    const nextLayout = (l: string) => (l === 'auto' ? 'compact' : l === 'compact' ? 'wide' : 'auto') as 'auto' | 'compact' | 'wide'
+
+    const commands = () => {
+      const curLayout = view.layout ?? cfg.layout
+      const open = snap.tasks.filter(t => t.state !== 'COMPLETED' && t.state !== 'CANCELLED').sort((x, y) => y.priority - x.priority).slice(0, 8)
+      return (
+        <Box flexDirection="column">
+          {line(C.section('화면', W))}
+          <Box flexWrap="wrap" columnGap={1}>
+            <Button key="cmd-refresh" label="새로고침" onPress={() => refreshNow($).then(say)} />
+            <Button key="cmd-dashboard" label="브라우저 대시보드" onPress={() => openPreview($, null, null).then(say)} />
+            <Button key="cmd-layout" label={`배치: ${LAYOUT_LABEL[curLayout] ?? curLayout}`} onPress={() => setView($, v => ({ ...v, layout: nextLayout(curLayout) }))} />
+            <Button key="cmd-close" label="Pane 닫기" onPress={() => $.ui.close({ id: PANE })} />
+          </Box>
+          {line(C.section('사용자 차례', W))}
+          <Box columnGap={1}>
+            <Button key="cmd-decisions" label={`승인·결정 열기 (${userWait}건)`} variant={userWait ? 'primary' : undefined} onPress={() => setView($, v => ({ ...v, tab: 'decisions' }))} />
+            <Text dimColor>미리보기 승인·수정 요청과 결정은 그 탭의 버튼으로 한다</Text>
+          </Box>
+          {can && line(C.section('진행', W))}
+          {can && (
+            <Box columnGap={1}>
+              {snap.paused ? (
+                <Button key="cmd-resume" label="배정 재개" variant="primary" onPress={() => act($, { kind: 'resume' })} />
+              ) : (
+                <Button key="cmd-pause" label="새 배정 일시 중지" onPress={() => act($, { kind: 'pause', reason: 'TUI에서 일시 중지' })} />
+              )}
+              <Text dimColor>{snap.paused ? `중지됨: ${snap.paused.reason}` : '실행 중인 에이전트는 계속된다'}</Text>
             </Box>
-          )
-        })}
-        {snap.paused ? (
-          <Button key="resume" label="배정 재개" onPress={() => act($, { kind: 'resume' })} />
-        ) : (
-          <Button key="pause" label="새 배정 일시 중지" onPress={() => act($, { kind: 'pause', reason: 'TUI에서 일시 중지' })} />
-        )}
-      </Box>
-    ) : null
+          )}
+          {can && line(C.section('동시 실행 한도', W))}
+          {can && (
+            <Box flexWrap="wrap" columnGap={3}>
+              {[...C.POOLS, 'verify'].map(pool => {
+                const sl = snap.slots[pool]
+                const lim = sl?.limit ?? 1
+                return (
+                  <Box key={`slot-${pool}`} columnGap={1}>
+                    <Text>{`${C.POOL_LABEL[pool]} ${pool === 'verify' ? `대기 ${sl?.queued ?? 0}` : `${sl?.used ?? 0}`}/${sl?.limit ?? '?'}`}</Text>
+                    <Button key={`dec-${pool}`} label="−" plain onPress={() => act($, { kind: 'limit', pool, n: Math.max(1, lim - 1) })} />
+                    <Button key={`inc-${pool}`} label="+" plain onPress={() => act($, { kind: 'limit', pool, n: Math.min(16, lim + 1) })} />
+                  </Box>
+                )
+              })}
+            </Box>
+          )}
+          {can && open.length > 0 && line(C.section('우선순위 (높을수록 먼저 배정)', W))}
+          {can &&
+            open.map(t => (
+              <Box key={`pri-${t.id}`} columnGap={1}>
+                <Button key={`pri-up-${t.id}`} label="▲" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority + 1 })} />
+                <Button key={`pri-down-${t.id}`} label="▼" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority - 1 })} />
+                {line([{ text: `${C.pad(`p${t.priority}`, 4)} `, tone: 'accent' }, { text: `${C.pad(t.id, 8)} `, bold: true }, { text: C.fit(t.title, Math.max(8, W - 22)), tone: 'dim' }])}
+              </Box>
+            ))}
+          {!can && <Text dimColor>읽기 전용 설정(allowActions=false)이라 상태를 바꾸는 버튼은 숨겼다</Text>}
+          {line(C.section('같은 일을 하는 명령', W))}
+          {C.HELP.map((text, i) => (
+            <Text key={`help-${i}`} dimColor wrap="truncate">{text}</Text>
+          ))}
+        </Box>
+      )
+    }
 
     const decisions = () => {
       const waiting = C.awaiting(snap)
@@ -524,25 +576,34 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const queue = () => (
+    const tasksTab = () => (
       <Box flexDirection="column">
         <Box columnGap={1}>
           <Button
-            key="filter"
-            label={`필터: ${C.FILTER_LABEL[view.filter]}`}
-            onPress={() => setView($, v => ({ ...v, filter: C.FILTERS[(C.FILTERS.indexOf(v.filter) + 1) % C.FILTERS.length] ?? 'all' }))}
+            key="task-mode"
+            label={view.taskMode === 'list' ? '보기: 목록' : '보기: 타임라인'}
+            onPress={() => setView($, v => ({ ...v, taskMode: v.taskMode === 'list' ? 'timeline' : 'list' }))}
           />
-          <Text dimColor>작업 줄을 누르면 담당 경로·완료 기준을 펼친다</Text>
+          {view.taskMode === 'list' && (
+            <Button
+              key="filter"
+              label={`필터: ${C.FILTER_LABEL[view.filter]}`}
+              onPress={() => setView($, v => ({ ...v, filter: C.FILTERS[(C.FILTERS.indexOf(v.filter) + 1) % C.FILTERS.length] ?? 'all' }))}
+            />
+          )}
+          <Text dimColor>{view.taskMode === 'list' ? '줄을 누르면 담당 경로·완료 기준을 펼친다' : '기록된 시작·끝 시각으로 그린다'}</Text>
         </Box>
-        {C.queueLines(snap, view.filter, view.expanded, W).map((r, i) =>
-          r.id ? (
-            <Button key={`q-${r.id}`} plain onPress={() => setView($, v => ({ ...v, expanded: v.expanded === r.id ? null : (r.id ?? null) }))}>
-              {r.line.map(seg)}
-            </Button>
-          ) : (
-            <Box key={`ql-${i}`}>{line(r.line)}</Box>
-          ),
-        )}
+        {view.taskMode === 'timeline'
+          ? lines(C.timelineLines(snap, now, W))
+          : C.queueLines(snap, view.filter, view.expanded, W).map((r, i) =>
+              r.id ? (
+                <Button key={`q-${r.id}`} plain onPress={() => setView($, v => ({ ...v, expanded: v.expanded === r.id ? null : (r.id ?? null) }))}>
+                  {r.line.map(seg)}
+                </Button>
+              ) : (
+                <Box key={`ql-${i}`}>{line(r.line)}</Box>
+              ),
+            )}
       </Box>
     )
 
@@ -556,47 +617,38 @@ export const register: Register = (on, options) => {
     const body = (tab: Tab, width: number) => {
       switch (tab) {
         case 'overview':
-          return (
-            <Box flexDirection="column">
-              {lines(C.overviewLines(snap, meta, runs, now, warns).map(l => C.fitLine(l, width)))}
-              {slotControls}
-            </Box>
-          )
+          return lines(C.overviewLines(snap, runs, now, width))
+        case 'tasks':
+          return tasksTab()
         case 'agents':
           return lines(C.agentLines(snap, runs, now, view.expanded).map(l => C.fitLine(l, width)))
-        case 'queue':
-          return queue()
-        case 'timeline':
-          return lines(C.timelineLines(snap, now, width))
-        case 'git':
-          return lines(C.gitLines(snap, width))
         case 'decisions':
           return decisions()
-        case 'metrics':
-          return lines(C.metricLines(snap, runs, usage).map(l => C.fitLine(l, width)))
-        case 'errors':
+        case 'git':
+          return lines([...C.gitLines(snap, width), ...C.metricLines(snap, runs, usage).map(l => C.fitLine(l, width))])
+        case 'activity':
           return errors()
+        case 'commands':
+          return commands()
       }
     }
 
-    const footer = (
-      <Box flexDirection="column">
-        {view.lastAction && <Text dimColor wrap="truncate">{view.lastAction}</Text>}
-        {line(C.freshness(snap, meta, now))}
-      </Box>
-    )
+    const header = lines(C.headerLines(snap, meta, runs, now, warns, W, cfg.refreshMs))
+    const footer = view.lastAction ? <Text dimColor wrap="truncate">{view.lastAction}</Text> : null
 
-    if (layout === 'wide') {
+    // 넓은 자리에서는 표 위주 탭 옆에 에이전트 목록을 붙인다. 버튼이 많은 탭은 한 줄로 쓴다
+    if (layout === 'wide' && view.tab !== 'commands' && view.tab !== 'decisions') {
       const left = Math.floor(W * 0.62)
-      const right = W - left - 1
+      const right = W - left - 2
       return (
         <Box flexDirection="column" width={W}>
+          {header}
           {tabs}
-          <Box columnGap={1}>
+          <Box columnGap={2}>
             <Box flexDirection="column" width={left}>{body(view.tab, left)}</Box>
             <Box flexDirection="column" width={right}>
-              {lines(C.miniLines(snap, meta, runs, right, warns))}
-              {lines(C.agentLines(snap, runs, now, null).slice(0, 10).map(l => C.fitLine(l, right)))}
+              {line(C.section('에이전트', right))}
+              {lines(C.agentLines(snap, runs, now, null).slice(0, 12).map(l => C.fitLine(l, right)))}
             </Box>
           </Box>
           {footer}
@@ -605,8 +657,8 @@ export const register: Register = (on, options) => {
     }
     return (
       <Box flexDirection="column" width={W}>
+        {header}
         {tabs}
-        {lines(C.miniLines(snap, meta, runs, W, warns).slice(1))}
         {body(view.tab, W)}
         {footer}
       </Box>

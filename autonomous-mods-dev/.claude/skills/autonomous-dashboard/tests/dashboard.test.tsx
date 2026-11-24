@@ -74,7 +74,7 @@ test('경고: 멈춤·연속 실패·유령 슬롯·긴 단계를 숫자로만 �
   const kinds = C.anomalies(snap, runs, 20 * MIN, 10 * MIN).map(a => `${a.kind}:${a.task ?? a.agentId}`)
   expect(kinds).toEqual(['long-stage:API', 'stall:API', 'repeat-fail:busy'])
   expect(C.anomalies(SNAP, [], 0, 10 * MIN).map(a => a.kind)).toEqual(['ghost']) // API 슬롯, 실행 없음
-  expect(C.statusText(snap, C.EMPTY_META, runs, C.anomalies(snap, runs, 20 * MIN, 10 * MIN))).toContain('⚠3')
+  expect(C.statusText(snap, C.EMPTY_META, runs, C.anomalies(snap, runs, 20 * MIN, 10 * MIN))).toContain('경고 3')
 })
 
 test('연속 실패는 성공 한 번에 끊긴다', async () => {
@@ -95,8 +95,11 @@ test('marker만으로 작업을 잇고, 없으면 잇지 않는다', async () =>
 
 test('명령 해석: 승인·수정 요청은 사용자가 본 버전이 있어야 한다', async () => {
   expect(C.parseCommand('')).toEqual({ kind: 'open' })
-  expect(C.parseCommand('queue')).toEqual({ kind: 'tab', tab: 'queue' })
-  expect(C.parseCommand('status')).toEqual({ kind: 'tab', tab: 'overview' })
+  expect(C.parseCommand('queue')).toEqual({ kind: 'tab', tab: 'tasks', mode: 'list' })
+  expect(C.parseCommand('timeline')).toEqual({ kind: 'tab', tab: 'tasks', mode: 'timeline' })
+  expect(C.parseCommand('metrics')).toEqual({ kind: 'tab', tab: 'git', mode: null })
+  expect(C.parseCommand('status')).toEqual({ kind: 'tab', tab: 'overview', mode: null })
+  expect(C.parseCommand('commands')).toEqual({ kind: 'tab', tab: 'commands', mode: null })
   expect(C.parseCommand('preview UI v2')).toEqual({ kind: 'preview', task: 'UI', version: 2 })
   expect(C.parseCommand('preview')).toEqual({ kind: 'preview', task: null, version: null })
   expect(C.parseCommand('approve UI').kind).toBe('error')
@@ -174,7 +177,7 @@ test('미리보기 경로와 브라우저 명령', async () => {
 test('슬롯 점유와 실제 실행을 구분한다', async () => {
   expect(C.unobservedHolders(SNAP, []).map(t => t.id)).toEqual(['API'])
   expect(C.unobservedHolders(SNAP, [run({ task: 'API', pool: 'implement' })])).toEqual([])
-  expect(C.statusText(SNAP, C.EMPTY_META, [])).toBe('auto ✓1/4 ●0/1 ?2')
+  expect(C.statusText(SNAP, C.EMPTY_META, [])).toBe('자율 완료 1/4 · 실행 0/배정 1 · 답 필요 2')
 })
 
 test('대기열 필터와 결정 대기 표시', async () => {
@@ -193,14 +196,13 @@ test('새 승인·결정 대기만 알린다', async () => {
 
 // ---------------------------------------------------------------- 엔진 위에서
 
-type Calls = { argv: string[][] }
+type Calls = { argv: string[][]; live: { snap: Snapshot | string; mtime: number }; clock: ReturnType<typeof mock.clock> }
 
 // 엔진은 realPath를 실행 중인 OS의 표기로 돌려준다(Windows면 D:\repo\...). 비교할 때는 / 로 맞춘다.
 const slash = (a: string[] | undefined) => a?.map(x => x.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
 
 const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean } = {}): Calls => {
-  const calls: Calls = { argv: [] }
-  mock.clock(on)
+  const calls: Calls = { argv: [], live: { snap, mtime: 1 }, clock: mock.clock(on) }
   on('command.register', () => ({ value: { command: 'autonomous' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.machine', () => ({ value: { sysname: 'Linux', release: '6', machine: 'x86_64', packageManagers: [], runtimes: [] } }))
@@ -219,9 +221,9 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
   on('fs.stat', (_, e) => {
     if (e.path.endsWith('dashboard.error.json')) throw new Error('ENOENT')
     const kind = e.path.endsWith('.py') || e.path.endsWith('.json') || e.path.endsWith('.html') ? 'file' : 'dir'
-    return { value: { kind, size: 1, mtimeMs: 1, isLink: false, ...(e.resolve ? { realPath: e.path } : {}) } }
+    return { value: { kind, size: 1, mtimeMs: calls.live.mtime, isLink: false, ...(e.resolve ? { realPath: e.path } : {}) } }
   })
-  on('fs.read', () => ({ value: typeof snap === 'string' ? snap : JSON.stringify(snap) }))
+  on('fs.read', () => ({ value: typeof calls.live.snap === 'string' ? calls.live.snap : JSON.stringify(calls.live.snap) }))
   let spawned = 0
   on('agent.spawn', () => ({ model: 'sonnet', agentId: `ag-${++spawned}` }))
   return calls
@@ -276,7 +278,7 @@ test('좁은 inline 자리에서는 mini 요약만 그린다', async ($, on) => 
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, placement: 'inline', bodyColumns: 40 } })
   expect((await ui.find({ type: 'Text', text: /AUTO/ }))?.text).toContain('1/4')
-  expect(await ui.find({ key: 'tab-queue' })).toBeUndefined()
+  expect(await ui.find({ key: 'tab-tasks' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -350,4 +352,42 @@ test('손상된 스냅샷은 작업 상태로 바꾸지 않고 오류로 보인�
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /손상/ }))?.text).toContain('JSON')
   await ui.unmount()
+})
+
+test('스냅샷 파일이 바뀌면 명령 없이 다음 틱에 다시 그린다', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const live = async () => (await ui.find({ type: 'Text', text: /실시간/ }))?.text
+  const before = await live()
+  expect(before).toBeDefined()
+  calls.live.snap = { ...SNAP, completed: 2, tasks: SNAP.tasks.map(t => (t.id === 'API' ? { ...t, state: 'COMPLETED' as const } : t)) }
+  calls.live.mtime = 2
+  await calls.clock.advance(2_000)
+  expect((await ui.find({ type: 'Text', text: /2\/4/ }))).toBeDefined()
+  expect(await live()).not.toBe(before) // 바뀐 것이 없어도 확인할 때마다 표시가 움직인다
+  await ui.unmount()
+})
+
+test('명령 탭: 버튼만으로 일시 중지·한도·우선순위를 바꾼다', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-commands' })
+  expect(calls.argv.some(a => a.includes('pause'))).toBe(false) // 탭을 여는 것만으로는 바꾸지 않는다
+  await ui.press({ key: 'cmd-pause' })
+  expect(calls.argv.find(a => a.includes('pause'))?.slice(-2)).toEqual(['pause', '--reason=TUI에서 일시 중지'])
+  await ui.press({ key: 'inc-implement' })
+  expect(calls.argv.find(a => a.includes('limit'))?.slice(-3)).toEqual(['limit', 'implement', '4'])
+  await ui.press({ key: 'pri-up-DOC' })
+  expect(calls.argv.find(a => a.includes('priority'))?.slice(-3)).toEqual(['priority', 'DOC', '1'])
+  await ui.unmount()
+})
+
+test('긴 설명은 낱말 단위로 줄을 나누고 넘치면 …로 끝낸다', async () => {
+  expect(C.wrapText('settings의 PATH에 git이 없다', 17, 3)).toEqual(['settings의 PATH에', 'git이 없다'])
+  expect(C.wrapText('abcdefghij', 4, 5)).toEqual(['abcd', 'efgh', 'ij'])
+  const cut = C.wrapText('가 나 다 라 마 바 사 아', 6, 2)
+  expect(cut.length).toBe(2)
+  expect(cut[1]?.endsWith('…')).toBe(true)
 })

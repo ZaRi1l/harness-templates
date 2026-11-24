@@ -91,6 +91,8 @@ export type SnapMeta = {
   root: string | null
   stateDir: string | null
   readAtMs: number
+  /** 마지막으로 파일 변화를 확인한 시각. 바뀐 것이 없어도 틱마다 갱신해 화면에 '실시간'을 보인다 */
+  checkedMs: number
   mtimeMs: number
   error: string | null
   stale: boolean
@@ -120,7 +122,8 @@ export type Run = {
 
 export type Activity = { atMs: number; level: 'info' | 'warn' | 'error'; source: 'mod' | 'agent' | 'tool'; task: string | null; text: string }
 
-export type Tab = 'overview' | 'agents' | 'queue' | 'timeline' | 'git' | 'decisions' | 'metrics' | 'errors'
+export type Tab = 'overview' | 'tasks' | 'agents' | 'decisions' | 'git' | 'activity' | 'commands'
+export type TaskMode = 'list' | 'timeline'
 export type Layout = 'auto' | 'mini' | 'compact' | 'wide'
 export type QueueFilter = 'all' | 'active' | 'waiting' | 'blocked' | 'done'
 
@@ -128,6 +131,7 @@ export type View = {
   tab: Tab
   layout: Layout | null
   filter: QueueFilter
+  taskMode: TaskMode
   expanded: string | null
   errorsOnly: boolean
   lastAction: string | null

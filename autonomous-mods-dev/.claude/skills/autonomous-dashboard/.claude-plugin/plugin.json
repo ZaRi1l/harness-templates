@@ -24,7 +24,7 @@
       "title": "Pane width",
       "description": "전체 화면 터미널에서 도킹할 때 요청할 폭(40 이상). 사용자가 끌어 바꾼 폭이 우선이다",
       "type": "number",
-      "default": 72
+      "default": 90
     },
     "refreshSeconds": {
       "title": "Refresh seconds",
