@@ -1,0 +1,334 @@
+import type { On } from 'claude-code'
+import { expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+
+import * as C from '../hooks/core'
+import type { Run, Snapshot } from '../types'
+
+const ROOT = '/repo'
+const STATE = '/repo/.git/claude-auto'
+const SHA1 = 'a'.repeat(64)
+const SHA2 = 'b'.repeat(64)
+
+const task = (over: Partial<Snapshot['tasks'][number]>): Snapshot['tasks'][number] => ({
+  id: 'T', title: '작업', state: 'READY', priority: 0, risk: 'medium', profile: 'standard', paths: ['src/'], forbid: [],
+  deps: [], criteria: '테스트 통과', agent: null, attempts: 0, branch: null, worktree: null, base: null, head: null,
+  retries: 0, reason: '', created: '2026-11-24T10:00:00+09:00', updated: '2026-11-24T10:00:00+09:00', completed: null,
+  cleaned: false, pool: 'implement', runnable: true, waiting: null, decisions_open: [],
+  evidence: { valid: null, required: 1, items: [] },
+  preview: { required: false, versions: [], approved: null, feedback: [] },
+  timeline: [{ state: 'READY', start: '2026-11-24T10:00:00+09:00', end: null }],
+  ...over,
+})
+
+const SNAP: Snapshot = {
+  schema: 'autonomous-dashboard', schema_version: 1, generated_at: '2026-11-24T10:05:00+09:00', generated_ms: 0,
+  project: { root: ROOT, name: 'repo', state_dir: STATE },
+  integration: { branch: 'integration', head: 'c0ffee1234' },
+  paused: null, total: 4, completed: 1,
+  counts: { COMPLETED: 1, IMPLEMENTING: 1, AWAITING_APPROVAL: 1, READY: 1 },
+  slots: { research: { used: 0, limit: 2 }, design: { used: 0, limit: 1 }, preview: { used: 0, limit: 2 }, implement: { used: 1, limit: 3 }, verify: { queued: 0, limit: 2 } },
+  tasks: [
+    task({ id: 'API', title: '로그인 API를 아주 길게 설명하는 한국어 작업 제목입니다', state: 'IMPLEMENTING', agent: 'impl-1', attempts: 1, runnable: false, pool: null }),
+    task({
+      id: 'UI', title: '로그인 화면', state: 'AWAITING_APPROVAL', runnable: false, pool: null,
+      preview: {
+        required: true, approved: null, feedback: [{ at: '', on: 1, text: '버튼을 크게' }],
+        versions: [
+          { n: 1, file: `${STATE}/previews/UI/v1.html`, at: '', summary: '첫 안', sha256: SHA1 },
+          { n: 2, file: `${STATE}/previews/UI/v2.html`, at: '', summary: '버튼 키움', sha256: SHA2 },
+        ],
+      },
+    }),
+    task({ id: 'DOC', title: '문서', state: 'READY', decisions_open: ['D-1'], runnable: false, waiting: "사용자 결정 대기: ['D-1']" }),
+    task({ id: 'OLD', title: '끝난 작업', state: 'COMPLETED' }),
+  ],
+  decisions: [{
+    id: 'D-1', title: '문서 형식', question: '어느 형식?', kind: 'ux', tasks: ['DOC'],
+    options: [{ key: 'A', label: 'Markdown', pros: '가볍다', cons: '' }, { key: 'B', label: 'HTML', pros: '', cons: '무겁다' }],
+    recommend: 'A', why: '저장소에서 바로 읽힌다', state: 'OPEN', created: '', choice: null, note: null, by: null, answered_at: null,
+  }],
+  notes: [{ at: '', kind: 'strategy', text: 'API 먼저 통합한다', task: 'API' }],
+  events: [{ task: 'API', at: '2026-11-24T10:01:00+09:00', from: 'READY', to: 'IMPLEMENTING', reason: '' }],
+  integration_log: [{ time: '', status: 'MERGED', task: 'OLD', message: "'integration' a -> b" }],
+  metrics: { implement_peak_parallel: 1, implement_slot_limit: 3 },
+  anomalies: [],
+  dashboard_html: `${STATE}/previews/index.html`,
+}
+
+const run = (over: Partial<Run>): Run => ({
+  agentId: 'a1', role: 'implementer', description: '', task: null, pool: null, attempt: null, status: 'running',
+  startedMs: 0, endedMs: null, tools: 0, lastTool: '', errors: 0, lastActiveMs: 0, failStreak: 0, tokens: null, cwd: '', ...over,
+})
+
+// ---------------------------------------------------------------- 순수 함수
+
+test('경고: 멈춤·연속 실패·유령 슬롯·긴 단계를 숫자로만 정한다', async () => {
+  const MIN = 60_000
+  const snap = { ...SNAP, anomalies: [{ kind: 'long-stage' as const, task: 'API', state: 'IMPLEMENTING', seconds: 1800, median_s: 120, text: 'API IMPLEMENTING 30분째' }] }
+  const runs = [
+    run({ agentId: 'idle', task: 'API', pool: 'implement', lastActiveMs: 0 }),
+    run({ agentId: 'busy', lastActiveMs: 19 * MIN, failStreak: 3, lastTool: 'Bash' }),
+    run({ agentId: 'done', status: 'completed', lastActiveMs: 0 }),
+  ]
+  const kinds = C.anomalies(snap, runs, 20 * MIN, 10 * MIN).map(a => `${a.kind}:${a.task ?? a.agentId}`)
+  expect(kinds).toEqual(['long-stage:API', 'stall:API', 'repeat-fail:busy'])
+  expect(C.anomalies(SNAP, [], 0, 10 * MIN).map(a => a.kind)).toEqual(['ghost']) // API 슬롯, 실행 없음
+  expect(C.statusText(snap, C.EMPTY_META, runs, C.anomalies(snap, runs, 20 * MIN, 10 * MIN))).toContain('⚠3')
+})
+
+test('연속 실패는 성공 한 번에 끊긴다', async () => {
+  let b = C.addCall(undefined, 'Bash', true, 1)
+  b = C.addCall(b, 'Bash', true, 2)
+  expect(C.applyBatch(run({ failStreak: 2 }), b).failStreak).toBe(4)
+  b = C.addCall(b, 'Read a.py', false, 3)
+  b = C.addCall(b, 'Bash', true, 4)
+  const r = C.applyBatch(run({ failStreak: 2 }), b)
+  expect([r.failStreak, r.tools, r.errors, r.lastActiveMs, r.lastTool]).toEqual([1, 4, 3, 4, 'Bash'])
+})
+
+test('marker만으로 작업을 잇고, 없으면 잇지 않는다', async () => {
+  expect(C.parseMarker('[auto-task id=UI-1 pool=implement attempt=2]\n구현해')).toEqual({ task: 'UI-1', pool: 'implement', attempt: 2 })
+  expect(C.parseMarker('implementer로 UI-1을 구현해')).toBe(null)
+  expect(C.parseMarker('[auto-task id=../x pool=implement attempt=1]')).toBe(null)
+})
+
+test('명령 해석: 승인·수정 요청은 사용자가 본 버전이 있어야 한다', async () => {
+  expect(C.parseCommand('')).toEqual({ kind: 'open' })
+  expect(C.parseCommand('queue')).toEqual({ kind: 'tab', tab: 'queue' })
+  expect(C.parseCommand('status')).toEqual({ kind: 'tab', tab: 'overview' })
+  expect(C.parseCommand('preview UI v2')).toEqual({ kind: 'preview', task: 'UI', version: 2 })
+  expect(C.parseCommand('preview')).toEqual({ kind: 'preview', task: null, version: null })
+  expect(C.parseCommand('approve UI').kind).toBe('error')
+  expect(C.parseCommand('revise UI v2 버튼 색 바꿔')).toEqual({ kind: 'revise', task: 'UI', version: 2, feedback: '버튼 색 바꿔' })
+  expect(C.parseCommand('limit implement 99').kind).toBe('error')
+  expect(C.parseCommand('rm -rf /').kind).toBe('error')
+})
+
+test('sched 인수: 해시를 함께 보내고, 스냅샷에 없는 대상은 거부한다', async () => {
+  expect(C.schedArgs({ kind: 'approve', task: 'UI', version: 2 }, SNAP)).toEqual({
+    args: ['approve', 'UI', '--version', '2', '--sha', SHA2.slice(0, 16), '--by', 'tui'],
+  })
+  const stale = C.schedArgs({ kind: 'approve', task: 'UI', version: 1 }, SNAP) // v2가 나온 뒤의 v1 승인
+  expect('error' in stale && stale.error.includes('최신')).toBe(true)
+  expect('error' in C.schedArgs({ kind: 'approve', task: 'UI', version: 3 }, SNAP)).toBe(true)
+  expect('error' in C.schedArgs({ kind: 'approve', task: 'API', version: 1 }, SNAP)).toBe(true)
+  expect('error' in C.schedArgs({ kind: 'decide', id: 'D-1', choice: 'Z', note: '' }, SNAP)).toBe(true)
+  expect(C.schedArgs({ kind: 'decide', id: 'D-1', choice: 'B', note: '' }, SNAP)).toEqual({
+    args: ['decide', 'answer', 'D-1', '--choice=B', '--by', 'tui'],
+  })
+  // 피드백에 셸 문자가 있어도 인수 하나로만 가고, -로 시작해도 옵션으로 읽히지 않는다
+  const r = C.schedArgs({ kind: 'revise', task: 'UI', version: 2, feedback: '"; rm -rf / #' }, SNAP)
+  expect('args' in r && r.args[4]).toBe('--feedback="; rm -rf / #')
+  const dash = C.schedArgs({ kind: 'revise', task: 'UI', version: 2, feedback: '-여백 줄이기' }, SNAP)
+  expect('args' in dash && dash.args[4]).toBe('--feedback=-여백 줄이기')
+  expect(C.schedArgs({ kind: 'pause', reason: '-점검' }, SNAP)).toEqual({ args: ['pause', '--reason=-점검'] })
+})
+
+test('HTML이 아닌 미리보기는 열지 않는다', async () => {
+  const bat = { ...SNAP, tasks: SNAP.tasks.map(t => (t.id === 'UI' ? { ...t, preview: { ...t.preview, versions: [{ n: 1, file: `${STATE}/previews/UI/v1.bat`, at: '', sha256: SHA1 }] } } : t)) }
+  const r = C.previewTarget(bat, 'UI', 1)
+  expect('error' in r && r.error.includes('.html')).toBe(true)
+})
+
+test('한글은 두 칸으로 재고 폭에 맞게 자른다', async () => {
+  expect(C.strWidth('가나a')).toBe(5)
+  expect(C.fit('가나다라', 5)).toBe('가나…')
+  expect(C.strWidth(C.pad('한글', 6))).toBe(6)
+  const l = C.fitLine([{ text: '작업 ' }, { text: '아주 긴 제목입니다' }], 10)
+  expect(C.lineWidth(l) <= 10).toBe(true)
+})
+
+test('레이아웃 자동 선택', async () => {
+  expect(C.pickLayout('auto', 'inline', 200)).toBe('mini')
+  expect(C.pickLayout('auto', 'dock', 120)).toBe('wide')
+  expect(C.pickLayout('auto', 'dock', 60)).toBe('compact')
+  expect(C.pickLayout('compact', 'inline', 200)).toBe('compact')
+})
+
+test('비밀값 마스킹과 도구 요약', async () => {
+  expect(C.redact('curl -H "Authorization: Bearer abcdefghijklmnop" sk-abcdefghijklmnopqrstu')).toBe('curl -H "Authorization: Bearer ***" sk-***')
+  expect(C.redact('API_KEY=abc123 password: hunter2')).toBe('API_KEY=*** password: ***')
+  expect(C.toolSummary('Bash', { command: 'echo token=abc' }, 'names')).toBe('Bash')
+  expect(C.toolSummary('Bash', { command: 'echo token=abc' }, 'masked')).toBe('Bash echo token=***')
+  expect(C.toolSummary('Edit', { file_path: '/repo/src/secret/a.py' }, 'names')).toBe('Edit a.py')
+})
+
+test('스냅샷 검사: 손상·스키마 불일치를 구분한다', async () => {
+  expect('snap' in C.parseSnapshot(JSON.stringify(SNAP))).toBe(true)
+  expect(C.parseSnapshot('{').hasOwnProperty('error')).toBe(true)
+  const r = C.parseSnapshot(JSON.stringify({ ...SNAP, schema_version: 2 }))
+  expect('error' in r && r.error.includes('v2')).toBe(true)
+})
+
+test('미리보기 경로와 브라우저 명령', async () => {
+  expect(C.previewTarget(SNAP, 'UI', null)).toEqual({ file: `${STATE}/previews/UI/v2.html`, label: 'UI v2' })
+  expect(C.previewTarget(SNAP, null, null)).toEqual({ file: `${STATE}/previews/index.html`, label: '미리보기 대시보드' })
+  expect('error' in C.previewTarget(SNAP, 'API', null)).toBe(true)
+  expect(C.isInside('C:\\R\\.git\\claude-auto\\previews\\UI\\v1.html', 'c:/r/.git/claude-auto/previews', true)).toBe(true)
+  expect(C.isInside('/repo/.git/claude-auto/previews-evil/x.html', '/repo/.git/claude-auto/previews', false)).toBe(false)
+  expect(C.openerArgv('Windows_NT', 'C:/a b/v1.html')).toEqual(['explorer.exe', 'C:\\a b\\v1.html'])
+  expect(C.openerArgv('Linux', '/a/v1.html')).toEqual(['xdg-open', '/a/v1.html'])
+})
+
+test('슬롯 점유와 실제 실행을 구분한다', async () => {
+  expect(C.unobservedHolders(SNAP, []).map(t => t.id)).toEqual(['API'])
+  expect(C.unobservedHolders(SNAP, [run({ task: 'API', pool: 'implement' })])).toEqual([])
+  expect(C.statusText(SNAP, C.EMPTY_META, [])).toBe('auto ✓1/4 ●0/1 ?2')
+})
+
+test('대기열 필터와 결정 대기 표시', async () => {
+  const waiting = C.queueLines(SNAP, 'waiting', null, 80).filter(r => r.id).map(r => r.id)
+  expect(waiting).toEqual(['UI', 'DOC'])
+  const doc = C.queueLines(SNAP, 'all', 'DOC', 80).map(r => r.line.map(s => s.text).join(''))
+  expect(doc.some(l => l.includes('결정 대기 D-1'))).toBe(true)
+  expect(doc.some(l => l.includes('완료 기준'))).toBe(true)
+})
+
+test('새 승인·결정 대기만 알린다', async () => {
+  const before = { ...SNAP, tasks: SNAP.tasks.map(t => (t.id === 'UI' ? { ...t, state: 'PREVIEWING' as const } : t)), decisions: [] }
+  expect(C.changes(before, SNAP)).toEqual(['UI 미리보기 검토 대기', 'D-1 결정 필요: 문서 형식'])
+  expect(C.changes(SNAP, SNAP)).toEqual([])
+})
+
+// ---------------------------------------------------------------- 엔진 위에서
+
+type Calls = { argv: string[][] }
+
+// 엔진은 realPath를 실행 중인 OS의 표기로 돌려준다(Windows면 D:\repo\...). 비교할 때는 / 로 맞춘다.
+const slash = (a: string[] | undefined) => a?.map(x => x.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
+
+const engine = (on: On, snap: Snapshot | string = SNAP): Calls => {
+  const calls: Calls = { argv: [] }
+  mock.clock(on)
+  on('command.register', () => ({ value: { command: 'autonomous' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.machine', () => ({ value: { sysname: 'Linux', release: '6', machine: 'x86_64', packageManagers: [], runtimes: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('agent.list', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.close', () => ({ value: undefined }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', (_, e) => {
+    calls.argv.push([...e.argv])
+    const out = e.argv[0] === 'git' ? `${ROOT}/.git\n` : '{}'
+    return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('fs.stat', (_, e) => {
+    if (e.path.endsWith('dashboard.error.json')) throw new Error('ENOENT')
+    const kind = e.path.endsWith('.py') || e.path.endsWith('.json') || e.path.endsWith('.html') ? 'file' : 'dir'
+    return { value: { kind, size: 1, mtimeMs: 1, isLink: false, ...(e.resolve ? { realPath: e.path } : {}) } }
+  })
+  on('fs.read', () => ({ value: typeof snap === 'string' ? snap : JSON.stringify(snap) }))
+  let spawned = 0
+  on('agent.spawn', () => ({ model: 'sonnet', agentId: `ag-${++spawned}` }))
+  return calls
+}
+
+const PANE = {
+  plugin: 'autonomous-dashboard', component: 'Pane', requestId: 'autonomous',
+  props: { title: 'Autonomous', isFocused: false, bodyColumns: 72, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+} as const
+
+const start = ($: Engine) => $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+const command = ($: Engine, args: string) =>
+  $.command.run({ command: 'autonomous', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
+const spawn = ($: Engine, prompt: string, subagentType: string, description: string) =>
+  $.agent.spawn({
+    prompt, subagentType, description, tool_use_id: `tu-${description}`, provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'opus', background: false, fork: false,
+  })
+
+test('세션을 시작하면 스냅샷을 읽어 모든 표면에 그린다', async ($, on) => {
+  engine(on)
+  await start($)
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ type: 'Text', text: /1\/4/ }))?.text).toContain('작업 수 기준')
+    expect(await ui.find({ type: 'Text', text: /사용자 차례/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /실행 미확인 1/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('좁은 inline 자리에서는 mini 요약만 그린다', async ($, on) => {
+  engine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, placement: 'inline', bodyColumns: 40 } })
+  expect((await ui.find({ type: 'Text', text: /AUTO/ }))?.text).toContain('1/4')
+  expect(await ui.find({ key: 'tab-queue' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('marker가 있는 에이전트만 작업에 연결한다', async ($, on) => {
+  engine(on)
+  await start($)
+  await spawn($, '[auto-task id=API pool=implement attempt=1]\n구현', 'implementer', 'API 구현')
+  await spawn($, '아무 지시', 'Explore', '탐색')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-agents' })
+  expect(await ui.find({ type: 'Text', text: /API 구현 #1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /미연결/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /실행이 관측되지 않은/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('승인 명령은 본 버전의 해시와 함께 sched.py를 argv로 실행한다', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const r = await command($, 'approve UI v2')
+  expect(r.text).toContain('완료')
+  const sched = slash(calls.argv.find(a => a.includes('approve')))
+  expect(sched).toEqual(['uv', 'run', '--no-project', '--offline', 'python', `${ROOT}/.claude/hooks/sched.py`, 'approve', 'UI', '--version', '2', '--sha', SHA2.slice(0, 16), '--by', 'tui'])
+  expect((await command($, 'approve UI v1')).text).toContain('최신') // 거절된 옛 버전은 sched.py까지 가지 않는다
+})
+
+test('Pane의 결정 버튼은 사용자가 누른 선택지만 기록한다', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-decisions' })
+  expect(calls.argv.some(a => a.includes('decide'))).toBe(false) // 그리기만으로 기록하지 않는다
+  await ui.press({ key: 'pick-D-1-B' })
+  expect(calls.argv.find(a => a.includes('decide'))?.slice(-6)).toEqual(['decide', 'answer', 'D-1', '--choice=B', '--by', 'tui'])
+  await ui.unmount()
+})
+
+test('preview 명령은 등록된 미리보기 폴더 안의 파일만 브라우저로 연다', async ($, on) => {
+  const evil = { ...SNAP, tasks: SNAP.tasks.map(t => (t.id === 'UI' ? { ...t, preview: { ...t.preview, versions: [{ n: 1, file: '/etc/evil.html', at: '', sha256: SHA1 }] } } : t)) }
+  const calls = engine(on, evil)
+  await start($)
+  const r = await command($, 'preview UI v1')
+  expect(r.text).toContain('밖')
+  expect(calls.argv.some(a => a[0] === 'xdg-open')).toBe(false)
+})
+
+test('preview 명령: 대시보드를 새로 만들고 기본 브라우저로 연다', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const r = await command($, 'preview')
+  expect(r.text).toContain('기본 브라우저')
+  expect(calls.argv.some(a => a.includes('dashboard'))).toBe(true)
+  expect(slash(calls.argv.find(a => a[0] === 'xdg-open'))).toEqual(['xdg-open', `${STATE}/previews/index.html`])
+})
+
+test('읽기 전용이면 상태를 바꾸지 않는다', { options: { allowActions: false } }, async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const r = await command($, 'approve UI v2')
+  expect(r.text).toContain('읽기 전용')
+  expect(calls.argv.some(a => a.includes('approve'))).toBe(false)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-decisions' })
+  expect(await ui.find({ key: 'pick-D-1-A' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('손상된 스냅샷은 작업 상태로 바꾸지 않고 오류로 보인다', async ($, on) => {
+  engine(on, '{broken')
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /손상/ }))?.text).toContain('JSON')
+  await ui.unmount()
+})

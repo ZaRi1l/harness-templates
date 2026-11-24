@@ -18,3 +18,22 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -v
+
+  mod:
+    # autonomous-mods-dev의 Mod. Mods API는 early access라 검증한 Claude Code 버전을 고정한다.
+    runs-on: ubuntu-22.04
+    env:
+      CLAUDE_CODE_VERSION: 2.1.331
+      DISABLE_AUTOUPDATER: 1
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
+      MOD: autonomous-mods-dev/.claude/skills/autonomous-dashboard
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" && claude --version
+      - run: claude plugin validate "$MOD"
+      - run: claude plugin test "$MOD"

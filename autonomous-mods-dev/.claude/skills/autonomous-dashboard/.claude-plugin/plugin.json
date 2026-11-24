@@ -1,0 +1,86 @@
+{
+  "name": "autonomous-dashboard",
+  "version": "0.1.0",
+  "description": "autonomous-mods-dev 관제 Pane: sched.py 스냅샷과 실제 에이전트 이벤트를 나란히 보여 주고, 사용자가 누른 승인·결정만 sched.py로 기록한다",
+  "author": { "name": "ZaRi1l" },
+  "license": "MIT",
+  "defaultEnabled": true,
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "openOnStart": {
+      "title": "Open on start",
+      "description": "세션을 시작할 때 관제 Pane을 연다(터미널이 좁으면 넓어질 때까지 기다린다)",
+      "type": "boolean",
+      "default": true
+    },
+    "layout": {
+      "title": "Layout",
+      "description": "auto: 프롬프트 위 inline이면 mini, 도킹 폭 100칸 이상이면 wide, 아니면 compact",
+      "type": "string",
+      "options": ["auto", "mini", "compact", "wide"],
+      "default": "auto"
+    },
+    "paneColumns": {
+      "title": "Pane width",
+      "description": "전체 화면 터미널에서 도킹할 때 요청할 폭(40 이상). 사용자가 끌어 바꾼 폭이 우선이다",
+      "type": "number",
+      "default": 72
+    },
+    "refreshSeconds": {
+      "title": "Refresh seconds",
+      "description": "스냅샷 파일이 바뀌었는지 확인하는 간격(1~30초). 바뀌었을 때만 읽는다",
+      "type": "number",
+      "default": 2
+    },
+    "allowActions": {
+      "title": "Allow actions",
+      "description": "끄면 읽기 전용이다. 켜면 사용자가 누른 승인·수정 요청·결정·슬롯·일시 중지만 sched.py로 기록한다",
+      "type": "boolean",
+      "default": true
+    },
+    "toolDetail": {
+      "title": "Tool detail",
+      "description": "names: 도구 이름과 파일 이름만 보인다. masked: 명령 앞부분을 비밀값 마스킹 뒤 보인다",
+      "type": "string",
+      "options": ["names", "masked"],
+      "default": "names"
+    },
+    "launcher": {
+      "title": "Python launcher",
+      "description": "sched.py를 실행할 방법. 템플릿 기본은 uv",
+      "type": "string",
+      "options": ["uv", "python", "python3", "py"],
+      "default": "uv"
+    },
+    "maxEvents": {
+      "title": "Max events",
+      "description": "메모리에 남길 관측 이벤트 수(50~1000)",
+      "type": "number",
+      "default": 300
+    },
+    "statusLine": {
+      "title": "Status line",
+      "description": "상태 줄에 완료·실행·결정 대기 수를 보인다",
+      "type": "boolean",
+      "default": true
+    },
+    "notify": {
+      "title": "Notify",
+      "description": "승인·결정 대기, BLOCKED, 경고가 새로 생기면 토스트로 알린다",
+      "type": "boolean",
+      "default": true
+    },
+    "stallMinutes": {
+      "title": "Stall minutes",
+      "description": "실행 중인 에이전트가 이 시간(분) 동안 도구를 부르지 않으면 경고한다(1~120)",
+      "type": "number",
+      "default": 10
+    },
+    "tellManager": {
+      "title": "Tell manager",
+      "description": "켜면 새 경고를 manager가 읽는 메모로 한 번 덧붙인다. 끄면 화면·토스트에만 보인다",
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
