@@ -202,7 +202,7 @@ type Calls = { argv: string[][]; live: { snap: Snapshot | string; mtime: number 
 // 엔진은 realPath를 실행 중인 OS의 표기로 돌려준다(Windows면 D:\repo\...). 비교할 때는 / 로 맞춘다.
 const slash = (a: string[] | undefined) => a?.map(x => x.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
 
-const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean; sysname?: string; noPathExplorer?: boolean; teammateOnly?: boolean } = {}): Calls => {
+const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean; sysname?: string; noPathExplorer?: boolean; teammateOnly?: boolean; noSnapshotYet?: boolean } = {}): Calls => {
   const calls: Calls = { argv: [], live: { snap, mtime: 1 }, clock: mock.clock(on), agents: [] }
   on('command.register', () => ({ value: { command: 'asterbraid' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -214,6 +214,7 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
   on('ui.status', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   const mem = new Map<string, unknown>() // $.store 흉내(세션 너머 값)
+  let made = false // noSnapshotYet: sched snapshot을 부르기 전에는 상태·스냅샷 파일이 없다
   on('store.get', (_, e) => ({ value: mem.get(e.key) }))
   on('store.set', (_, e) => {
     mem.set(e.key, JSON.parse(JSON.stringify(e.value)))
@@ -221,6 +222,7 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
   })
   on('process.run', (_, e) => {
     calls.argv.push([...e.argv])
+    if (e.argv.includes('snapshot')) made = true
     if (opts.gitFails && e.argv[0] === 'git') throw new Error('spawn git ENOENT')
     if (opts.noPathExplorer && e.argv[0] === 'explorer.exe') throw new Error('spawn explorer.exe ENOENT')
     const out = e.argv[0] === 'git' ? `${ROOT}/.git\n` : '{}'
@@ -228,6 +230,7 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
   })
   on('fs.stat', (_, e) => {
     if (e.path.endsWith('dashboard.error.json')) throw new Error('ENOENT')
+    if (opts.noSnapshotYet && !made && /(dashboard|state)\.json$/.test(e.path)) throw new Error('ENOENT')
     const kind = e.path.endsWith('.py') || e.path.endsWith('.json') || e.path.endsWith('.html') ? 'file' : 'dir'
     return { value: { kind, size: 1, mtimeMs: calls.live.mtime, isLink: false, ...(e.resolve ? { realPath: e.path } : {}) } }
   })
@@ -707,4 +710,15 @@ test('에이전트 트리: 열을 한글 폭으로 맞추고, 좁으면 오른�
   expect(narrow.join('\n')).not.toContain('53k')
   expect(narrow.join('\n')).not.toContain('도구 34')
   expect(narrow[0]).toContain('implementer') // 실행 중이 대기보다 위
+})
+
+test('처음 열면(시작 준비 전) 빈 스냅샷을 만들어 명령 탭 버튼을 바로 쓸 수 있다', async ($, on) => {
+  const calls = engine(on, { ...SNAP, tasks: [], decisions: [], total: 0, completed: 0, counts: {} }, { noSnapshotYet: true })
+  await start($)
+  expect(calls.argv.some(a => a.includes('snapshot'))).toBe(true)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-commands' })
+  await ui.press({ key: 'cmd-away-previews' })
+  expect(calls.argv.find(a => a.includes('away'))?.slice(-3)).toEqual(['away', '--previews', '--reason=TUI에서 자리 비움'])
+  await ui.unmount()
 })

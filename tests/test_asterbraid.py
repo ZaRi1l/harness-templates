@@ -610,6 +610,8 @@ class TestBootstrap(unittest.TestCase):
         (repo / "docs").mkdir()
         (repo / "docs/design.md").write_text("# 설계\n", encoding="utf-8")
         self.assertEqual(sched("status").returncode, 0)  # 커밋이 없어도 상태를 본다
+        self.assertEqual(sched("snapshot").returncode, 0)  # Mod가 시작 준비 전에 빈 화면을 그린다
+        self.assertEqual(sched("away", "--previews").returncode, 0)  # 시작 준비 전에도 자리 비움을 켤 수 있다
         self.assertIn("TODO", (repo / "CLAUDE.md").read_text(encoding="utf-8"))  # manager가 준비가 필요하다고 판단하는 근거
         self.assertNotEqual(sched("init").returncode, 0)  # main은 통합 브랜치가 될 수 없다
         # 지침 순서: 커밋하기 전에 integration으로 바꾼다(main에는 커밋하지 않는다)
@@ -619,6 +621,7 @@ class TestBootstrap(unittest.TestCase):
         self.assertNotEqual(git("rev-parse", "--verify", "-q", "main").returncode, 0)  # main은 비어 있다
         r = sched("init")
         self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("자리 비움", sched("status").stdout)  # init이 자리 비움을 지우지 않는다
         self.assertEqual(json.loads(r.stdout)["integration_branch"], "integration")
         manager = self.bootstrap_text()
         self.assertLess(manager.index("커밋하기 전에** `git switch -c integration`"), manager.index("커밋한다(`chore: 하네스 시작 준비`)"))

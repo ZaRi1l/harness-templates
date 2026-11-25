@@ -116,7 +116,7 @@ async function poll($: EngineInterface, force = false) {
     ])
     const had = (await read($, snapA)) !== null
     if (!st) {
-      await update($, metaA, x => ({ ...x, readAtMs: now, error: '스냅샷이 없다. sched init 전이거나 /asterbraid refresh가 필요하다', stale: had }))
+      await update($, metaA, x => ({ ...x, readAtMs: now, error: '아직 시작 전이다. manager가 시작 준비를 하면 자동으로 보인다(바로 보려면 /asterbraid refresh)', stale: had }))
       return
     }
     const errText = errSt && errSt.mtimeMs >= st.mtimeMs ? await $.fs.read(`${m.stateDir}/dashboard.error.json`).catch(() => '') : ''
@@ -329,8 +329,9 @@ export const register: Register = (on, options) => {
     await discover($, e.cwd)
     await poll($, true)
     const m = await read($, metaA)
-    if (!(await read($, snapA)) && m.stateDir && (await $.fs.exists(`${m.stateDir}/state.json`).catch(() => false))) {
-      await runSched($, ['snapshot']) // 상태는 있는데 스냅샷만 없을 때. 작업 상태는 바꾸지 않는다
+    if (!(await read($, snapA)) && m.stateDir) {
+      // 시작 준비 전(sched init 전)이어도 빈 스냅샷을 만들어 탭·버튼을 그린다(자리 비움을 먼저 켤 수 있게). 작업 상태는 바꾸지 않는다
+      await runSched($, ['snapshot'])
     }
     timer?.cancel()
     timer = null

@@ -102,6 +102,12 @@ uv run --no-project python <템플릿 위치>/asterbraid/asterbraid.py install .
 - `update`는 직접 고치지 않은 하네스 파일만 바꾼다. 프로젝트 설정(`verify.config.json`, `auto.config.json`)은 건드리지 않는다.
 - 프로젝트에서 Claude에게 "asterbraid로 설치해줘"라고 해도 된다(설정을 바꾸는 단계라 승인 창이 뜰 수 있다).
 
+손으로 넣어도 된다(설치 프로그램을 쓸 수 없을 때):
+1. 템플릿의 `.claude/`와 `CLAUDE.md`를 프로젝트 루트에 복사한다. 같은 이름의 파일이 이미 있으면 덮지 말고 합친다:
+   `.claude/settings.json`은 템플릿의 `permissions`·`hooks`·`enabledPlugins`·`worktree`·`env` 항목을 더하고,
+   기존 `CLAUDE.md`는 끝에 `@.claude/asterbraid.md` 한 줄만 더하고, `.gitignore`에 `.claude/settings.local.json`·`.claude/worktrees/`·`.playwright-cli/`를 더한다.
+2. `asterbraid.py check <프로젝트 폴더>`로 빠진 것이 없는지 본다. 나중에 `update`를 쓰려면 `install`을 한 번 실행한다(같은 파일은 그대로 두고 기록만 남긴다).
+
 설치 뒤:
 1. 설계·요구사항 문서를 넣거나(예: `docs/design.md`) 대화로 준다. git 저장소가 아니어도 된다(manager가 `git init`한다).
    기존 프로젝트면 커밋하지 않은 변경은 커밋하거나 치워 둔다(시작 준비는 섞인 변경을 커밋하지 않고 묻는다).
