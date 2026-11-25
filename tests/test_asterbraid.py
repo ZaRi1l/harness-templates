@@ -437,6 +437,14 @@ class TestAgentSkills(unittest.TestCase):
         self.assertEqual(seen["architect"], ["architecture-design"])
         self.assertEqual(seen["designer"], ["preview-workflow"])
 
+    def test_every_agent_can_call_skill(self):
+        """사용자가 설치한 스킬(playwright-cli 등)을 어느 역할이든 쓸 수 있어야 한다."""
+        agents = sorted((self.CLAUDE / "agents").glob("*.md"))
+        self.assertEqual(len(agents), 6)
+        for agent in agents:
+            tools = re.search(r"^tools:(.*)$", self.frontmatter(agent), re.M).group(1)
+            self.assertIn("Skill", [t.strip() for t in tools.split(",")], agent.name)
+
     def test_ai_docs_folder_is_committed_and_skips_tests(self):
         """AI 문서는 docs/asterbraid/에 커밋하고(worktree에서 보이게), 문서만 바뀌면 테스트를 돌리지 않는다."""
         root = self.CLAUDE.parent

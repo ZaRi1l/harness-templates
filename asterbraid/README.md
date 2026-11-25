@@ -192,7 +192,7 @@ verifier는 한 번 검증할 때 막는 결함을 모두 적는다(라운드마
 | 스킬 | 쓰는 에이전트 | 쓰는 곳 |
 |---|---|---|
 | test-driven-development, systematic-debugging, verification-before-completion (superpowers) | implementer | 새 동작, 원인을 모르는 실패, 완료 보고 전 |
-| playwright-cli | verifier, designer | verifier: 웹 UI를 실제 브라우저로 열어 미리보기와 비교·버튼·입력·콘솔 오류 확인(없으면 "브라우저 검증 못 함"을 남기고 다른 근거로 판정). designer: 미리보기가 브라우저에서 뜨는지 확인 |
+| playwright-cli | verifier, designer, researcher | verifier: 웹 UI를 실제 브라우저로 열어 미리보기와 비교·버튼·입력·콘솔 오류 확인(없으면 "브라우저 검증 못 함"을 남기고 다른 근거로 판정). designer: 미리보기가 브라우저에서 뜨는지 확인. researcher: 검색 결과만으로 모자랄 때 실제 페이지를 연다 |
 
 ## 디자인 스킬 (선택)
 designer는 세션에 있는 것만 `Skill`로 골라 쓴다. 없으면 기본 절차로 만든다. 설치는 사용자가 한다.
