@@ -90,7 +90,7 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
 | CONFLICT / FAIL | 자동으로 RETRY가 됐다. implementer에게 사유를 보내 `sched sync ID`부터 재작업 |
 | REJECTED | 사유대로 처리(검증 부족이면 verifier, 커밋이 바뀌었으면 다시 submit) |
 | BUSY | 다른 통합이 끝난 뒤 다시 |
-| BLOCKED | 사유를 사용자에게 보고 |
+| BLOCKED | 환경 문제면 아래 '사용자 결정'의 진단부터. 그래도 남으면 사유를 사용자에게 보고 |
 
 ## 사용자와 대화
 - 진행 상황은 관제 화면(`/autonomous`, autonomous-dashboard Mod)이 보여 준다. 매 단계 상태를 되풀이해 설명하지 않는다.
@@ -102,7 +102,7 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
 
 ## 사용자 결정 (결정에 묶인 작업만 멈추고, 나머지는 계속)
 대상: 중요한 UI·UX·설계·제품 방향, 데이터 모델·공통 인터페이스 변경, 호환성을 깨는 변경, 외부 의존성·패키지 설치,
-요구사항 충돌, 비용·재시도 한도 초과, 자동 복구가 안 되는 Git 상태, 권한·환경 장애. 흔한 저위험 구현 판단은 묻지 않는다.
+요구사항 충돌, 비용·재시도 한도 초과, 자동 복구가 안 되는 Git 상태, 진단해도 사용자만 풀 수 있는 권한·환경 장애. 흔한 저위험 구현 판단은 묻지 않는다.
 1. 결정을 연다. 선택지마다 장단점을 쓰고 추천과 이유를 붙인다.
    `sched decide add --id D-1 --title … --question … --kind ui|ux|architecture|data|breaking|dependency|requirements|direction|environment|limit|other --tasks A,B --option "A: …" --option "B: …" --pros "A: …" --cons "B: …" --recommend A --why "…" [--evidence 경로,…]`
    열린 결정에 묶인 작업은 프로그램이 시작·통합을 거부한다. 여러 결정은 한꺼번에 연다.
@@ -110,6 +110,10 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
 3. 사용자가 실제로 답한 것만 `sched decide answer D-1 --choice A [--note …]`로 기록한다. 답이 없으면 OPEN으로 둔다.
    응답을 후속 작업의 지시문에 넣는다. 방향이 바뀌면 `sched decide cancel`, 필요한 작업은 새로 등록하거나 취소한다.
 - 작업 자체가 진행할 수 없는 장애(환경·권한·재시도 한도)는 `sched block ID --reason …`, 풀리면 `sched unblock ID`.
+- 환경 문제로 보이면(테스트가 코드 밖 원인으로 실패, 도구 실행 실패 등) 사용자에게 넘기기 전에 원인을 좁힌다.
+  읽기 전용 진단 작업을 등록해 researcher나 implementer에게 맡기고(설정·보안 설정·테스트를 바꾸지 않는다),
+  관리자 권한, 사용자 설정 파일 수정, 보안 프로그램 설정처럼 사용자만 할 수 있는 일이 남을 때만 결정을 연다.
+  결정에는 진단으로 확인한 것과 사용자가 할 일을 구체적으로 쓴다.
 
 ## 끝
 대기열이 모두 COMPLETED·BLOCKED·CANCELLED면 `sched cleanup`, `sched metrics`를 실행하고 보고한다:
