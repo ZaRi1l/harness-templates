@@ -451,7 +451,7 @@ export const register: Register = (on, options) => {
     if (!snap) {
       return (
         <Box flexDirection="column" width={W}>
-          <Text bold color="claude">ASTERBRAID</Text>
+          <Text bold color="claude">✦ ASTERBRAID</Text>
           <Text color={meta.error ? 'warning' : undefined} wrap="wrap">{meta.error ?? '스냅샷을 읽는 중'}</Text>
           <Text dimColor wrap="wrap">manager가 `sched init` 뒤 작업을 등록하면 여기에 보인다. /asterbraid refresh</Text>
         </Box>
@@ -710,7 +710,7 @@ export const register: Register = (on, options) => {
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column" width={Math.max(20, e.props.bodyColumns)}>
-        <Text bold>ASTERBRAID</Text>
+        <Text bold>✦ ASTERBRAID</Text>
         <Text color="error" wrap="wrap">{`그리기 실패(${next.error.kind}): ${next.error.message ?? ''}. /asterbraid refresh 또는 manager에게 상태를 묻는다`}</Text>
       </Box>
     )

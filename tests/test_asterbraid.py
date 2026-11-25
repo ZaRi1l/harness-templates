@@ -1,4 +1,4 @@
-"""autonomous-mods-dev: 기존 autonomous 테스트를 그대로 다시 돌리고, 확장한 스케줄러 기능을 검사한다."""
+"""asterbraid: 기존 autonomous 테스트를 그대로 다시 돌리고, 확장한 스케줄러 기능을 검사한다."""
 
 import hashlib
 import json
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import test_autonomous as base
 
-MODS = "autonomous-mods-dev"
+MODS = "asterbraid"
 
 
 class TestSchedulerRegression(base.TestScheduler):

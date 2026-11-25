@@ -1,4 +1,4 @@
-# 설계 기록 — AsterBraid (autonomous-mods-dev)
+# 설계 기록 — AsterBraid
 
 `autonomous-parallel-dev`의 결정(JSON 상태 + 잠금, `.git/claude-auto/`, 상태 변경은 `sched.py`로만, 통합은 프로그램,
 임시 worktree 통합, 커밋에 묶인 증거)은 그대로 둔다. 아래는 이 템플릿에서 더한 것이다.
@@ -14,7 +14,7 @@
 ## 결정
 | 주제 | 결정 | 이유 |
 |---|---|---|
-| 이름 (2026-11-25) | 사람에게 보이는 이름은 **AsterBraid**로 통일: Mod `asterbraid-dashboard`, 명령 `/asterbraid`, 스킬 `asterbraid-bootstrap`, 문서 `docs/asterbraid/`. 템플릿 폴더와 엔진 내부 이름(`.git/claude-auto/`, `auto.config.json`, `[auto-task]`, 스냅샷 `schema`)은 그대로 | harness·autonomous·auto가 섞여 있었다. Loom·Heddle은 같은 분야 오픈소스가 많아 명령이 겹칠 수 있어 피했다(2026-11-25 검색). 내부 이름은 autonomous-parallel-dev와 같은 엔진이고 진행 중인 프로젝트가 깨져 바꾸지 않는다 |
+| 이름 (2026-11-25) | 사람에게 보이는 이름은 **AsterBraid**로 통일: Mod `asterbraid-dashboard`, 명령 `/asterbraid`, 스킬 `asterbraid-bootstrap`, 문서 `docs/asterbraid/`, 템플릿 폴더 `asterbraid/`(대표 템플릿이라 `방식-dev` 규칙에서 뺐다, 옛 이름 autonomous-mods-dev). 엔진 내부 이름(`.git/claude-auto/`, `auto.config.json`, `[auto-task]`, 스냅샷 `schema`)은 그대로 | harness·autonomous·auto가 섞여 있었다. Loom·Heddle은 같은 분야 오픈소스가 많아 명령이 겹칠 수 있어 피했다(2026-11-25 검색). 내부 이름은 autonomous-parallel-dev와 같은 엔진이고 진행 중인 프로젝트가 깨져 바꾸지 않는다 |
 | 템플릿 분리 | `autonomous-parallel-dev`를 복사해 이 템플릿에만 기능을 더한다 | 기존 엔진을 바꾸지 않고, Mods API(early access) 의존을 이 템플릿에 가둔다 |
 | Mod 위치 | `.claude/skills/asterbraid-dashboard/` + `enabledPlugins` | 프로젝트에서 자동 로드되는 유일한 위치. `--plugin-dir`·사용자 설정 변경이 필요 없다 |
 | 상태 원천 | `sched.py`의 `state.json` 하나. Mod는 별도 DB·스케줄러를 두지 않는다 | 규칙을 두 곳에서 구현하면 어긋난다 |
@@ -50,7 +50,7 @@
 |---|---|
 | `verify.py` | 모든 템플릿과 같은 파일(테스트가 검사) |
 | `sched.py` | `autonomous-parallel-dev`의 상위 집합. 기존 명령·출력은 유지하고 확장만 한다. 기존 autonomous 테스트를 이 템플릿에 그대로 다시 돌린다 |
-| `integrate.py` | 두 곳만 다르다: 결정 대기 거부, 통합 기록 뒤 스냅샷 갱신(`autonomous-mods-dev 추가` 주석) |
+| `integrate.py` | 두 곳만 다르다: 결정 대기 거부, 통합 기록 뒤 스냅샷 갱신(`asterbraid 추가` 주석) |
 | 엔진 버그 수정 | 두 autonomous 템플릿에 함께 적용하고 각자의 테스트로 확인한다 |
 
 ## 무엇이 어떻게 보장되나

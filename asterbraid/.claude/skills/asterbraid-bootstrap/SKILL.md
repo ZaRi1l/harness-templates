@@ -1,6 +1,6 @@
 ---
 name: asterbraid-bootstrap
-description: autonomous-mods-dev의 시작 준비(처음 한 번). 템플릿과 설계 문서만 있는 새 저장소, 또는 하네스를 이식한 기존 프로젝트에서 manager가 CLAUDE.md·verify.config.json·.gitignore를 채우고(기존 내용은 살린다), integration 브랜치를 만들고, 기준선 테스트를 확인하고, sched init까지 할 때 쓴다.
+description: asterbraid의 시작 준비(처음 한 번). 템플릿과 설계 문서만 있는 새 저장소, 또는 하네스를 이식한 기존 프로젝트에서 manager가 CLAUDE.md·verify.config.json·.gitignore를 채우고(기존 내용은 살린다), integration 브랜치를 만들고, 기준선 테스트를 확인하고, sched init까지 할 때 쓴다.
 ---
 
 # 시작 준비 (manager, 처음 한 번)

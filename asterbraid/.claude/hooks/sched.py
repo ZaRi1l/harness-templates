@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""autonomous-mods-dev 작업 스케줄러 (표준 라이브러리만 사용, Python 3.8+).
+"""asterbraid 작업 스케줄러 (표준 라이브러리만 사용, Python 3.8+).
 
 작업 상태를 <git common dir>/claude-auto/state.json 에 둔다. 모든 변경은 잠금 + 원자적 교체로 기록하고,
 상태 전이·의존성·담당 경로·실행 슬롯·검증 증거 규칙은 이 프로그램이 강제한다. 에이전트는 상태 파일을
@@ -88,7 +88,7 @@ SLOT_STATE = {"research": "RESEARCHING", "design": "DESIGNING", "preview": "PREV
               "implement": "IMPLEMENTING"}
 # 아직 통합되지 않은 변경을 가진 작업은 담당 경로를 계속 잡고 있다
 PATH_HOLDERS = {"IMPLEMENTING", "RETRY", "VERIFYING", "READY_TO_MERGE", "MERGING"}
-DESIGN_DEPTHS = ("light", "standard", "deep")  # autonomous-mods-dev 추가: 설계 필요성을 위험도와 따로 정한다
+DESIGN_DEPTHS = ("light", "standard", "deep")  # asterbraid 추가: 설계 필요성을 위험도와 따로 정한다
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")  # 경로(previews/<ID>)와 marker에 그대로 쓴다
 DECISION_KINDS = ("ui", "ux", "architecture", "data", "breaking", "dependency", "requirements", "direction",
                   "environment", "limit", "other")
@@ -587,7 +587,7 @@ def marker(task_id: str, pool: str, attempt: int) -> str:
 def cmd_done(a, root, cfg):
     with store(root) as st:
         t = get(st, a.id)
-        if a.close:  # autonomous-mods-dev 추가: 조사·설계만 하는 작업을 구현 없이 완료로 닫는다
+        if a.close:  # asterbraid 추가: 조사·설계만 하는 작업을 구현 없이 완료로 닫는다
             if not a.notes and not t["notes"]:
                 raise Refused(f"{t['id']}: 결과 노트(--notes) 없이 닫지 않는다")
             if t["branch"]:
@@ -812,7 +812,7 @@ def cmd_unblock(a, root, cfg):
 def cmd_cancel(a, root, cfg):
     with store(root) as st:
         t = get(st, a.id)
-        # autonomous-mods-dev 추가: 승인된 미리보기를 취소·재등록으로 잃지 않게 한다(의존 변경은 `deps`로)
+        # asterbraid 추가: 승인된 미리보기를 취소·재등록으로 잃지 않게 한다(의존 변경은 `deps`로)
         if t["preview"]["approved"] is not None and not a.force:
             raise Refused(f"{t['id']}에는 승인된 미리보기(v{t['preview']['approved']})가 있다. "
                           "의존만 바꾸려면 `sched deps`를 쓴다. 정말 취소하려면 --force")
@@ -824,7 +824,7 @@ DEPS_LOCKED = {"IMPLEMENTING", "VERIFYING", "READY_TO_MERGE", "MERGING", "COMPLE
 
 
 def cmd_deps(a, root, cfg):
-    """autonomous-mods-dev 추가: 구현을 시작하기 전 작업의 의존을 바꾼다. 미리보기 승인·노트·결정은 그대로다."""
+    """asterbraid 추가: 구현을 시작하기 전 작업의 의존을 바꾼다. 미리보기 승인·노트·결정은 그대로다."""
     with store(root) as st:
         t = get(st, a.id)
         if t["state"] in DEPS_LOCKED:
@@ -932,7 +932,7 @@ def cmd_recover(a, root, cfg):
 
 def cmd_cleanup(a, root, cfg):
     results = {}
-    # autonomous-mods-dev 추가: --dry-run은 지울 worktree·브랜치만 보여 주고 아무것도 바꾸지 않는다
+    # asterbraid 추가: --dry-run은 지울 worktree·브랜치만 보여 주고 아무것도 바꾸지 않는다
     with store(root, write=not a.dry_run) as st:
         integ = st["integration_branch"]
         busy = {t["worktree"] for t in st["tasks"].values() if t["state"] not in ("COMPLETED", "CANCELLED")}

@@ -1,6 +1,6 @@
 ---
 name: architecture-design
-description: autonomous-mods-dev의 설계 절차. architect가 작업의 설계 노트(design.md)를 설계 깊이(light/standard/deep)에 맞게 쓸 때 쓴다. 여러 implementer가 추측 없이 같은 계약으로 구현하도록 인터페이스·데이터·오류·작업 분할을 정한다.
+description: asterbraid의 설계 절차. architect가 작업의 설계 노트(design.md)를 설계 깊이(light/standard/deep)에 맞게 쓸 때 쓴다. 여러 implementer가 추측 없이 같은 계약으로 구현하도록 인터페이스·데이터·오류·작업 분할을 정한다.
 ---
 
 # 설계 절차 (architect)

@@ -555,7 +555,8 @@ export const pushActivity = (list: Activity[], items: Activity[], max: number) =
 const head = (text: string): Line => [{ text, tone: 'accent', bold: true }]
 const kv = (k: string, v: string, tone: Tone = 'plain'): Line => [{ text: `${k} `, tone: 'dim' }, { text: v, tone }]
 
-const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+// 확인할 때마다 한 칸씩 반짝이는 별(aster). 모두 한 칸 문자다
+const SPIN = ['·', '✧', '✦', '✧']
 /** `── 제목 ─────` 구분선. */
 export const section = (title: string, width: number): Line => [
   { text: `── ${title} `, tone: 'accent', bold: true },
@@ -602,7 +603,7 @@ export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: nu
     ? { text: '✗ 갱신 실패', tone: 'err', bold: true }
     : { text: `${SPIN[Math.floor(meta.checkedMs / Math.max(1, refreshMs)) % SPIN.length]} 실시간 · 변화 ${ago(ms(snap.generated_at), now)}`, tone: 'ok' }
   const left = fitLine(
-    [{ text: 'ASTERBRAID ', tone: 'accent', bold: true }, { text: `${snap.project.name} · ${snap.integration.branch ?? '통합 브랜치 없음'} ${short(snap.integration.head)}`, tone: 'dim' }],
+    [{ text: '✦ ASTERBRAID ', tone: 'accent', bold: true }, { text: `${snap.project.name} · ${snap.integration.branch ?? '통합 브랜치 없음'} ${short(snap.integration.head)}`, tone: 'dim' }],
     Math.max(0, width - strWidth(live.text) - 1),
   )
   const lines: Line[] = [[...left, { text: ' '.repeat(Math.max(1, width - lineWidth(left) - strWidth(live.text))) }, live]]
@@ -920,7 +921,7 @@ export const miniLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], width: nu
   const p = progress(snap)
   const lines: Line[] = [
     [
-      { text: 'AUTO ', tone: 'accent', bold: true },
+      { text: '✦ AsterBraid ', tone: 'accent', bold: true },
       { text: `✓ ${p.done}/${p.of}`, tone: 'ok' },
       { text: ` · 실행 ${runningRuns(runs).length} · 슬롯 ${slotUsed(snap)} · 검증 ${snap.counts.VERIFYING ?? 0} · 통합대기 ${snap.counts.READY_TO_MERGE ?? 0}` },
     ],

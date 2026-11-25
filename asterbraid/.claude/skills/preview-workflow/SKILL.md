@@ -1,6 +1,6 @@
 ---
 name: preview-workflow
-description: autonomous-mods-dev의 미리보기 제작·등록 절차. designer가 작업 ID의 미리보기 HTML을 만들고 sched.py에 버전으로 등록할 때, verifier가 승인된 미리보기와 구현을 비교할 때 쓴다.
+description: asterbraid의 미리보기 제작·등록 절차. designer가 작업 ID의 미리보기 HTML을 만들고 sched.py에 버전으로 등록할 때, verifier가 승인된 미리보기와 구현을 비교할 때 쓴다.
 ---
 
 # 미리보기 절차

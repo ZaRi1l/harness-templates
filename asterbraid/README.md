@@ -1,4 +1,4 @@
-# AsterBraid (autonomous-mods-dev)
+# AsterBraid
 
 여러 에이전트가 각자 worktree에서 짠 작업을 검증해 하나로 엮는 Claude Code 하네스. 이름은 별(aster)들을 땋는다(braid)는 뜻이다.
 
@@ -37,7 +37,7 @@ flowchart TD
 - **일시 중지**(`sched pause`)는 새 배정(`start`)만 막는다. 실행 중인 에이전트·검증·통합은 계속된다.
 
 ## autonomous-parallel-dev와의 차이
-| | autonomous-parallel-dev | autonomous-mods-dev |
+| | autonomous-parallel-dev | asterbraid |
 |---|---|---|
 | 스케줄러·통합·검증 엔진 | 기준 | 같은 엔진 + 아래 확장 (`verify.py`는 같은 파일) |
 | 진행 상황 보기 | manager의 보고, `sched status`, HTML | + Claude Code 안의 관제 Pane(7개 탭, 버튼만으로 조작), 상태 줄 |
@@ -101,7 +101,7 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
 
 ## 관제 화면 (asterbraid-dashboard)
 ```
- ASTERBRAID shop · integration 3f2a1c9                        ⠹ 실시간 · 변화 2m00s 전
+ ✦ ASTERBRAID shop · integration 3f2a1c9                      ✧ 실시간 · 변화 2m00s 전
  진행 ████░░░░░░░░░░ 4/12 완료 33% (작업 수 기준)
  실행 3 · 배정 4 · 검증 1 · 통합 대기 0 · 실행 미확인 1
  ▶ 사용자 차례: 미리보기 승인 1 · 결정 1  → 4 승인·결정 탭
@@ -114,7 +114,7 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
  ── manager · strategy · PAY-1 ────────────────────────────────────────────────────────
  결제 API를 먼저 통합하고 화면은 승인 뒤 시작한다
 ```
-- 머리말(위 다섯 줄)은 모든 탭 위에 있다. 오른쪽 위 회전 표시는 Mod가 스냅샷 파일을 확인할 때마다(기본 2초) 한 칸 돈다.
+- 머리말(위 다섯 줄)은 모든 탭 위에 있다. 오른쪽 위 별(· ✧ ✦ ✧)은 Mod가 스냅샷 파일을 확인할 때마다(기본 2초) 한 칸씩 반짝인다.
   숫자가 그대로여도 표시가 돌면 자동 갱신은 살아 있고, 스케줄러 상태가 바뀌지 않은 것이다. "변화"는 스냅샷이 마지막으로 바뀐 때다.
 - 레이아웃: 프롬프트 위 inline이면 **mini**(두 줄 요약), 도킹 폭 100칸 이상이면 **wide**(표 옆에 에이전트 열), 아니면 **compact**. 한글은 2칸으로 재서 자른다.
 - 상태는 색과 함께 기호(✓ ● ◎ ? ✗ ↻ ⇢ ⏸ ⚠)와 글자로 보인다. 완료율은 작업 수 기준이며 공수 진행률이 아니다.
@@ -242,7 +242,7 @@ Mod 설정은 Claude Code 설정 메뉴(또는 settings의 `pluginConfigs`)에�
 - linked worktree에서 열어도 공통 git 폴더의 같은 상태를 본다.
 
 ## 테스트
-- 스케줄러: `python -m unittest discover -s tests -p "test_autonomous_mods.py"` (기존 autonomous 테스트를 이 템플릿에 다시 돌리는 회귀 + 확장 기능)
+- 스케줄러: `python -m unittest discover -s tests -p "test_asterbraid.py"` (기존 autonomous 테스트를 이 템플릿에 다시 돌리는 회귀 + 확장 기능)
 - Mod: `claude plugin validate .claude/skills/asterbraid-dashboard`, `claude plugin test .claude/skills/asterbraid-dashboard`
 - 타입: Mod 폴더를 한 번 로드하면 엔진이 `.claude-plugin/types/`를 쓰고, 그 뒤 `npx -p typescript tsc -p .claude/skills/asterbraid-dashboard`
 

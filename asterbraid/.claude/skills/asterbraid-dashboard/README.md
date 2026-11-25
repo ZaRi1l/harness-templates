@@ -1,6 +1,6 @@
 # asterbraid-dashboard
 
-`autonomous-mods-dev`의 관제 Mod(Claude Code 플러그인, hooks 모듈). 사용법·명령·설정·보안·한계는 템플릿 [README](../../../README.md)와 [DESIGN](../../../DESIGN.md)에 있다.
+`asterbraid`의 관제 Mod(Claude Code 플러그인, hooks 모듈). 사용법·명령·설정·보안·한계는 템플릿 [README](../../../README.md)와 [DESIGN](../../../DESIGN.md)에 있다.
 
 | 파일 | 역할 |
 |---|---|

@@ -1,7 +1,7 @@
 {
   "name": "asterbraid-dashboard",
   "version": "0.1.0",
-  "description": "autonomous-mods-dev 관제 Pane: sched.py 스냅샷과 실제 에이전트 이벤트를 나란히 보여 주고, 사용자가 누른 승인·결정만 sched.py로 기록한다",
+  "description": "asterbraid 관제 Pane: sched.py 스냅샷과 실제 에이전트 이벤트를 나란히 보여 주고, 사용자가 누른 승인·결정만 sched.py로 기록한다",
   "author": { "name": "ZaRi1l" },
   "license": "MIT",
   "defaultEnabled": true,

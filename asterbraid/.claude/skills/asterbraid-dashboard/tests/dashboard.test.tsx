@@ -279,7 +279,7 @@ test('좁은 inline 자리에서는 mini 요약만 그린다', async ($, on) => 
   engine(on)
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, placement: 'inline', bodyColumns: 40 } })
-  expect((await ui.find({ type: 'Text', text: /AUTO/ }))?.text).toContain('1/4')
+  expect((await ui.find({ type: 'Text', text: /✦ AsterBraid/ }))?.text).toContain('1/4')
   expect(await ui.find({ key: 'tab-tasks' })).toBeUndefined()
   await ui.unmount()
 })
@@ -534,4 +534,15 @@ test('결정 버튼을 연달아 눌러도 sched.py는 한 번만 부른다', as
   await Promise.all([ui.press({ key: 'pick-D-1-A' }), ui.press({ key: 'pick-D-1-A' })])
   expect(calls.argv.filter(a => a.includes('decide')).length).toBe(1)
   await ui.unmount()
+})
+
+test('머리말: 제목 별과 반짝이는 실시간 표시, 별 문자는 한 칸으로 재고 폭을 넘지 않는다', async () => {
+  expect([C.charWidth(0x2726), C.charWidth(0x2727)]).toEqual([1, 1]) // ✦ ✧
+  const frames = [0, 2000, 4000, 6000].map(t => {
+    const head = C.headerLines(SNAP, { ...C.EMPTY_META, checkedMs: t }, [], 0, [], 60, 2000)[0] ?? []
+    expect(C.lineWidth(head)).toBeLessThanOrEqual(60)
+    expect(head.map(s => s.text).join('')).toContain('✦ ASTERBRAID')
+    return head[head.length - 1]?.text.split(' ')[0]
+  })
+  expect(frames).toEqual(['·', '✧', '✦', '✧'])
 })

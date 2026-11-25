@@ -47,7 +47,7 @@ def out(root: Path, status: str, task_id: str, message: str, **extra) -> int:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except OSError:
         pass
-    try:  # autonomous-mods-dev 추가: 방금 쓴 통합 기록까지 스냅샷에 반영한다. 실패해도 결과는 그대로다
+    try:  # asterbraid 추가: 방금 쓴 통합 기록까지 스냅샷에 반영한다. 실패해도 결과는 그대로다
         with S.store(root, write=False) as st:
             S.write_snapshot(root, st)
     except Exception:  # noqa: BLE001
@@ -87,7 +87,7 @@ def prepare(root: Path, cfg: dict, task_id: str):
                 return "MERGED", "이전 실행에서 이미 반영됐다"
         if t["state"] != "READY_TO_MERGE":
             return "REJECTED", f"{t['state']} 상태다. READY_TO_MERGE인 작업만 통합한다"
-        held = S.hold_reason(st, t)  # autonomous-mods-dev 추가: 사용자 결정이 걸린 작업은 통합하지 않는다
+        held = S.hold_reason(st, t)  # asterbraid 추가: 사용자 결정이 걸린 작업은 통합하지 않는다
         if held:
             return "REJECTED", f"{held}. 결정이 기록된 뒤 통합한다"
         sha = t["head"]
