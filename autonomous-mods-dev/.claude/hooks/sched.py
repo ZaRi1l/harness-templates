@@ -579,6 +579,19 @@ def marker(task_id: str, pool: str, attempt: int) -> str:
 def cmd_done(a, root, cfg):
     with store(root) as st:
         t = get(st, a.id)
+        if a.close:  # autonomous-mods-dev 추가: 조사·설계만 하는 작업을 구현 없이 완료로 닫는다
+            if not a.notes and not t["notes"]:
+                raise Refused(f"{t['id']}: 결과 노트(--notes) 없이 닫지 않는다")
+            if t["branch"]:
+                raise Refused(f"{t['id']}: 작업 브랜치가 있다. 구현 작업은 검증·통합으로 끝낸다")
+            ok = t["state"] in ("RESEARCHING", "DESIGNING") or (
+                t["state"] == "BLOCKED" and (t["researched"] or t["designed"]))
+            if not ok:
+                raise Refused(f"{t['id']}는 조사·설계 단계가 아니다({t['state']})")
+            if a.notes:
+                t["notes"].append(a.notes)
+            transition(t, "COMPLETED", "조사·설계만 하는 작업 완료", force=True)
+            return brief(t)
         if t["state"] == "RESEARCHING":
             t["researched"] = True
         elif t["state"] == "DESIGNING":
@@ -1184,7 +1197,7 @@ def main() -> int:
     cmd("next", cmd_next, (("--pool",), {"required": True, "choices": ["research", "design", "preview", "approval", "implement", "verify", "merge"]}))
     cmd("start", cmd_start, ID, (("--pool",), {"required": True, "choices": list(SLOT_STATE)}),
         (("--agent",), {"required": True}))
-    cmd("done", cmd_done, ID, (("--notes",), {"default": ""}))
+    cmd("done", cmd_done, ID, (("--notes",), {"default": ""}), (("--close",), {"action": "store_true"}))
     cmd("preview", cmd_preview, ID, (("--file",), {"required": True}), (("--summary",), {"default": ""}))
     BY = (("--by",), {"default": "user"})  # 누가 기록했나: user(manager가 사용자 답을 옮김) / cli / tui
     cmd("approve", cmd_approve, ID, (("--version",), {"type": int, "default": 0}), (("--sha",), {"default": ""}), BY)

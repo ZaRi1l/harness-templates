@@ -27,12 +27,13 @@ color: purple
         (테스트가 통과해도 틀릴 수 있는 이 프로젝트 고유 항목: 값의 범위·단위, 경계, 보안, 데이터 보존).
       - `.claude/hooks/verify.config.json`: 아래 표. 언어와 테스트 도구는 설계 문서를 따른다.
       - `.gitignore`: `.claude/settings.local.json`, `.claude/worktrees/`, 언어별 산출물(예: `__pycache__/`, `.no-pycache/`, `node_modules/`).
-   3. 바꿀 내용을 한 번에 요약해 `AskUserQuestion`으로 확인받는다(추천을 첫 선택지로).
+   3. 바꿀 내용을 한 번에 요약해 `AskUserQuestion`으로 확인받는다(추천을 첫 선택지로). 여기서는 설정만 묻는다.
+      설계 결정(저장 방식, 화면 방향 등)은 7 뒤에 `sched decide add`로 연 다음 묻는다(관제 화면과 기록에 남게).
    4. 적용한다. `verify.config.json` 수정은 승인 창이 뜬다. 패키지는 설치하지 않는다(필요하면 사용자에게 명령을 알린다).
-   5. 커밋한다(`chore: 하네스 시작 준비`). 커밋이 하나도 없는 저장소여도 이것이 첫 커밋이 된다.
-      다른 사용자 변경이 섞여 있으면 커밋하지 말고 묻는다.
-   6. 메인 체크아웃이 보호 브랜치(`main`/`master`)면 `git switch -c integration`. 이미 다른 브랜치면 그것을 쓸지 묻는다.
-   7. `sched init`.
+   5. 메인 체크아웃이 보호 브랜치(`main`/`master`)면 **커밋하기 전에** `git switch -c integration`(`main`에는 커밋하지 않는다).
+      이미 다른 브랜치면 그것을 쓸지 묻는다. 커밋이 하나도 없는 저장소면 `git switch -c integration`이 빈 브랜치를 만든다.
+   6. 커밋한다(`chore: 하네스 시작 준비`). 다른 사용자 변경이 섞여 있으면 커밋하지 말고 묻는다.
+   7. `sched init`. 그다음 설계 결정이 있으면 한꺼번에 `sched decide add`로 열고 `AskUserQuestion` 한 번으로 묻는다.
 3. 진행 중이던 작업이 있으면 `sched recover --reset-running`으로 실제 Git 상태와 맞춘다.
 
 | `verify.config.json` 키 | 의미 |
@@ -71,6 +72,7 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
 |---|---|---|
 | 조사 | `sched next --pool research` → `start ID --pool research --agent 이름` | researcher. 끝나면 `sched done ID --notes 경로` |
 | 설계 | `next --pool design` → `start … --pool design` | architect. 끝나면 `sched done ID --notes 경로` |
+| 조사·설계만 하는 작업 닫기 | `sched done ID --close --notes 경로` | 진단처럼 구현이 필요 없으면 완료로 닫는다(BLOCKED로 쌓아 두지 않는다). 결과를 보고 구현·설계가 필요하면 작업을 새로 등록하거나 그대로 다음 단계로 보낸다 |
 | 미리보기 | `next --pool preview` → `start … --pool preview` | designer. `sched preview ID --file …`로 등록 |
 | 승인 받기 | `next --pool approval` | 사용자에게 `/autonomous preview`(또는 `sched dashboard` 경로)를 알리고 한꺼번에 묻는다. 사용자가 본 버전으로 `approve ID --version N --sha <해시 앞 12자>` / `revise ID --version N --feedback …`. 사용자가 관제 화면에서 직접 하면 기록할 것이 없다 |
 | 구현 | `next --pool implement` → `start … --pool implement` | implementer (반드시 `isolation: "worktree"`) |
@@ -114,6 +116,11 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
   읽기 전용 진단 작업을 등록해 researcher나 implementer에게 맡기고(설정·보안 설정·테스트를 바꾸지 않는다),
   관리자 권한, 사용자 설정 파일 수정, 보안 프로그램 설정처럼 사용자만 할 수 있는 일이 남을 때만 결정을 연다.
   결정에는 진단으로 확인한 것과 사용자가 할 일을 구체적으로 쓴다.
+  진단 범위를 조금씩 넓히며 승인을 거듭 받지 않는다. 원인을 좁혔으면 결정 하나로 끝낼 길을 함께 내놓는다:
+  (a) 사용자가 환경을 고치고(예외 등록·잠시 끄기) 다시 테스트, (b) 사용자 승인 아래 그 테스트를 환경 의존으로 표시
+  (해당 환경에서 사유를 남기고 건너뛰고, 같은 동작은 환경에 기대지 않는 테스트로 지킨다), (c) 보류.
+  (b)는 사용자가 고른 경우에만 하고 결정 ID를 테스트와 커밋에 남긴다. 스스로 테스트를 완화하는 것은 여전히 금지다.
+  결정을 기다리는 동안에도 그 결정에 묶이지 않은 작업(다른 기능, 환경과 무관한 검증 등)은 계속 진행한다.
 
 ## 끝
 대기열이 모두 COMPLETED·BLOCKED·CANCELLED면 `sched cleanup`, `sched metrics`를 실행하고 보고한다:

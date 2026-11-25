@@ -444,3 +444,20 @@ test('세션 시작 없이 다시 불러와져도(리로드) 다른 Hook에서 �
   expect(await live()).not.toBe(before)
   await ui.unmount()
 })
+
+test('에이전트 목록: 일을 마친 팀원(idle)은 실행으로 세지 않고, 목록에서 사라지면 끝난 것으로 본다', async () => {
+  const runs = [run({ agentId: 'idle-mate' }), run({ agentId: 'busy' }), run({ agentId: 'gone' }), run({ agentId: 'done' })]
+  const agents = [
+    { id: 'idle-mate', status: 'idle', taskStatus: 'running', tokenCount: 1200 },
+    { id: 'busy', status: 'running', taskStatus: 'running' },
+    { id: 'done', status: 'completed', taskStatus: 'completed' },
+  ] as const
+  const next = C.applyAgentList(runs, agents, 50)
+  expect(next.map(r => `${r.agentId}:${r.status}`)).toEqual(['idle-mate:idle', 'busy:running', 'gone:stopped', 'done:completed'])
+  expect(next[0]?.tokens).toBe(1200)
+  expect(C.runningRuns(next).map(r => r.agentId)).toEqual(['busy'])
+  // idle 팀원은 멈춤 경고 대상이 아니다
+  expect(C.anomalies(null, next, 60 * 60_000, 10 * 60_000).map(a => a.agentId)).toEqual(['busy'])
+  // 다시 일을 받으면 실행으로 돌아온다
+  expect(C.applyAgentList(next, [{ id: 'idle-mate', status: 'running', taskStatus: 'running' }], 60)[0]?.status).toBe('running')
+})

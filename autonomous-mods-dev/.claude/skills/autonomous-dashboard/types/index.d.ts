@@ -106,7 +106,8 @@ export type Run = {
   task: string | null
   pool: string | null
   attempt: number | null
-  status: 'running' | 'completed' | 'failed' | 'stopped'
+  /** idle: 일을 마치고 메시지를 기다리는 팀원(다시 일을 받으면 running) */
+  status: 'running' | 'idle' | 'completed' | 'failed' | 'stopped'
   startedMs: number
   endedMs: number | null
   tools: number

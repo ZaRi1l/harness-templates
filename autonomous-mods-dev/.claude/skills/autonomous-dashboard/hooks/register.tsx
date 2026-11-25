@@ -13,7 +13,7 @@ const TITLE = 'Autonomous'
 // 저장한 값의 모양을 바꾸면 shape 태그를 올린다. 예전 모양은 초기값으로 읽힌다.
 const snapA = atom({ plugin: 'autonomous-dashboard', key: 'snap' } as const, null as Snapshot | null, { shape: 'snap-1' })
 const metaA = atom({ plugin: 'autonomous-dashboard', key: 'meta' } as const, C.EMPTY_META, { shape: 'meta-2' })
-const runsA = atom({ plugin: 'autonomous-dashboard', key: 'runs' } as const, [] as Run[], { shape: 'runs-2' })
+const runsA = atom({ plugin: 'autonomous-dashboard', key: 'runs' } as const, [] as Run[], { shape: 'runs-3' })
 const activityA = atom({ plugin: 'autonomous-dashboard', key: 'activity' } as const, [] as Activity[], { shape: 'activity-1' })
 const viewA = atom({ plugin: 'autonomous-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-2' })
 const usageA = atom({ plugin: 'autonomous-dashboard', key: 'usage' } as const, { costUsd: null, contextPct: null } as Usage, { shape: 'usage-1' })
@@ -169,22 +169,10 @@ async function checkAnomalies($: EngineInterface) {
 /** 관측 값(에이전트 토큰·상태, 세션 비용·컨텍스트)을 Claude Code에서 읽는다. 추정하지 않는다. */
 async function observe($: EngineInterface) {
   const runs = await read($, runsA)
-  if (runs.some(r => r.status === 'running')) {
-    const agents = await $.agent.list().catch(() => [])
-    const byId = new Map(agents.map(a => [a.id, a]))
+  if (runs.some(r => r.status === 'running' || r.status === 'idle')) {
+    const agents = await $.agent.list().catch(() => null) // 목록을 못 읽으면 바꾸지 않는다(모두 끝난 것으로 오해하지 않게)
     const now = await $.clock.now()
-    await update($, runsA, list =>
-      C.listOf<Run>(list).map(r => {
-        const a = byId.get(r.agentId)
-        if (!a || r.status !== 'running') return r
-        const ended = a.taskStatus === 'completed' || a.taskStatus === 'failed' || a.taskStatus === 'killed'
-        return {
-          ...r,
-          tokens: typeof a.tokenCount === 'number' ? a.tokenCount : r.tokens,
-          ...(ended ? { status: a.taskStatus === 'completed' ? 'completed' : a.taskStatus === 'killed' ? 'stopped' : 'failed', endedMs: now } : {}),
-        } as Run
-      }),
-    )
+    if (agents) await update($, runsA, list => C.applyAgentList(C.listOf<Run>(list), agents, now))
   }
   const u = await $.session.usage().catch(() => null)
   if (u) await update($, usageA, () => ({ costUsd: u.cost?.usd ?? null, contextPct: u.context.percent ?? null }))

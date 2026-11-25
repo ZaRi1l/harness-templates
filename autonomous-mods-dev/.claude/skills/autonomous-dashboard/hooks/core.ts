@@ -429,6 +429,29 @@ export const openerArgv = (sysname: string, file: string): string[][] | null => 
 // ---------------------------------------------------------------- 요약
 
 export const runningRuns = (runs: Run[]) => runs.filter(r => r.status === 'running')
+
+/** `$.agent.list()`의 한 줄 중 여기서 쓰는 것. */
+export type AgentSeen = { readonly id: string; readonly status: string; readonly taskStatus: string; readonly tokenCount?: number }
+
+/**
+ * Claude Code가 보고한 에이전트 목록으로 실행 기록을 맞춘다.
+ * 팀원은 일을 마쳐도 taskStatus가 running으로 남으니 status(idle)를 본다. 목록에서 사라진 것은 끝난 것으로 본다.
+ */
+export const applyAgentList = (runs: Run[], agents: readonly AgentSeen[], now: number): Run[] => {
+  const byId = new Map(agents.map(a => [a.id, a]))
+  return runs.map(r => {
+    if (r.status !== 'running' && r.status !== 'idle') return r
+    const a = byId.get(r.agentId)
+    if (!a) return { ...r, status: 'stopped', endedMs: r.endedMs ?? now }
+    const tokens = typeof a.tokenCount === 'number' ? a.tokenCount : r.tokens
+    const end = a.status === 'completed' || a.taskStatus === 'completed' ? 'completed'
+      : a.status === 'failed' || a.taskStatus === 'failed' ? 'failed'
+      : a.status === 'killed' || a.taskStatus === 'killed' ? 'stopped' : null
+    if (end) return { ...r, tokens, status: end, endedMs: now }
+    const status: Run['status'] = a.status === 'idle' || a.status === 'waiting' ? 'idle' : 'running'
+    return { ...r, tokens, status, endedMs: status === 'idle' ? (r.status === 'idle' ? r.endedMs : now) : null, lastActiveMs: status === 'running' && r.status === 'idle' ? now : r.lastActiveMs }
+  })
+}
 export const slotUsed = (snap: Snapshot) => POOLS.reduce((n, p) => n + (snap.slots[p]?.used ?? 0), 0)
 export const openDecisions = (snap: Snapshot | null): Decision[] => (snap?.decisions ?? []).filter(d => d.state === 'OPEN')
 export const awaiting = (snap: Snapshot | null) => (snap?.tasks ?? []).filter(t => t.state === 'AWAITING_APPROVAL')
@@ -727,13 +750,13 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
   const ordered = [...runningRuns(runs), ...runs.filter(r => r.status !== 'running').reverse()].slice(0, 20)
   if (ordered.length === 0) out.push([{ text: '이 세션에서 관측한 서브에이전트가 없다', tone: 'dim' }])
   for (const r of ordered) {
-    const tone: Tone = r.status === 'running' ? 'accent' : r.status === 'completed' ? 'ok' : 'err'
-    const sym = r.status === 'running' ? '●' : r.status === 'completed' ? '✓' : '✗'
+    const tone: Tone = r.status === 'running' ? 'accent' : r.status === 'completed' ? 'ok' : r.status === 'idle' ? 'dim' : 'err'
+    const sym = r.status === 'running' ? '●' : r.status === 'completed' ? '✓' : r.status === 'idle' ? '◌' : '✗'
     out.push([
       { text: `${sym} `, tone },
       { text: pad(r.role, 12), bold: true },
       { text: r.task ? `${r.task} ${POOL_LABEL[r.pool ?? ''] ?? r.pool} #${r.attempt}` : '미연결(marker 없음)', tone: r.task ? 'plain' : 'warn' },
-      { text: ` · ${fmtDur((r.endedMs ?? now) - r.startedMs)} · 도구 ${r.tools}${r.errors ? ` · 오류 ${r.errors}` : ''}${r.tokens !== null ? ` · ${Math.round(r.tokens / 1000)}k tok` : ''}`, tone: 'dim' },
+      { text: ` · ${r.status === 'idle' ? '일 끝남(대기) · ' : ''}${fmtDur((r.endedMs ?? now) - r.startedMs)} · 도구 ${r.tools}${r.errors ? ` · 오류 ${r.errors}` : ''}${r.tokens !== null ? ` · ${Math.round(r.tokens / 1000)}k tok` : ''}`, tone: 'dim' },
     ])
     out.push([{ text: `    ${r.lastTool || r.description}`, tone: 'dim' }])
     if (expanded === r.agentId) {

@@ -73,7 +73,7 @@ Mod를 `.claude/mods/`가 아니라 `.claude/skills/`에 두는 것은 Claude Co
    (`/plugin` Installed 탭에 `autonomous-dashboard@skills-dir`. 넓은 터미널이면 Pane이 자동으로 열린다).
 3. 설계 문서를 주고 진행을 맡긴다. 처음 한 번 manager가 **시작 준비**를 한다:
    문서를 보고 `CLAUDE.md`의 TODO·`verify.config.json`(테스트 명령 등)·`.gitignore`를 채울 내용을 요약해 확인받고,
-   적용·커밋한 뒤 `integration` 브랜치를 만들고 `sched init`한다. `verify.config.json` 수정은 승인 창이 한 번 뜬다.
+   적용하고 `integration` 브랜치로 바꾼 뒤 커밋하고(`main`에는 커밋하지 않는다) `sched init`한다. 설계 결정은 그다음 `sched decide`로 연다. `verify.config.json` 수정은 승인 창이 한 번 뜬다.
 
 그 뒤 진행은 Pane에서 보고, 결정·검토가 필요하면 manager가 묻는다. 끝나면 `integration`을 확인하고 `main`에 직접 반영한다.
 직접 채우고 싶으면 시작 전에 TODO·`verify.config.json`·`.gitignore`를 채우고 `git switch -c integration`해 두면 manager가 준비를 건너뛴다.

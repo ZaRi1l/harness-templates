@@ -164,6 +164,33 @@ class TestPauseAndPriority(ModsCase):
         self.assertEqual([t["id"] for t in self.ok("next", "--pool", "implement")["dispatch"]], ["B", "A"])
 
 
+class TestCloseResearch(ModsCase):
+    """조사·설계만 하는 작업은 구현 단계 없이 결과 노트와 함께 완료로 닫는다."""
+
+    def test_close_research_stage_with_notes(self):
+        self.add("ENV", profile="research", paths="docs/env.md")
+        self.add("CORE", deps="ENV")
+        self.ok("start", "ENV", "--pool", "research", "--agent", "r")
+        self.assertIn("노트", self.refused("done", "ENV", "--close"))  # 결과 없이 닫지 않는다
+        out = self.ok("done", "ENV", "--close", "--notes", "notes/ENV.md")
+        self.assertEqual(out["state"], "COMPLETED")
+        self.assertEqual(self.ok("next", "--pool", "implement")["dispatch"][0]["id"], "CORE")  # 의존이 풀린다
+
+    def test_close_blocked_research_without_branch(self):
+        self.add("ENV", profile="research", paths="docs/env.md")
+        self.ok("start", "ENV", "--pool", "research", "--agent", "r")
+        self.ok("done", "ENV", "--notes", "notes/ENV.md")
+        self.ok("block", "ENV", "--reason", "구현 불필요")
+        self.assertEqual(self.ok("done", "ENV", "--close", "--notes", "notes/ENV.md")["state"], "COMPLETED")
+
+    def test_close_refuses_work_with_branch(self):
+        self.add("A")
+        self.ok("start", "A", "--pool", "implement", "--agent", "i")
+        self.ok("block", "A", "--reason", "환경")
+        self.assertRegex(self.refused("done", "A", "--close", "--notes", "n.md"), "브랜치|단계가 아니다")
+        self.assertEqual(self.state("A")["state"], "BLOCKED")
+
+
 class TestPreviewContract(ModsCase):
     def test_approve_checks_version_and_hash(self):
         shas = self.preview_ready(versions=2)
@@ -328,13 +355,17 @@ class TestBootstrap(unittest.TestCase):
         (repo / "docs/design.md").write_text("# 설계\n", encoding="utf-8")
         self.assertEqual(sched("status").returncode, 0)  # 커밋이 없어도 상태를 본다
         self.assertIn("TODO", (repo / "CLAUDE.md").read_text(encoding="utf-8"))  # manager가 준비가 필요하다고 판단하는 근거
+        self.assertNotEqual(sched("init").returncode, 0)  # main은 통합 브랜치가 될 수 없다
+        # 지침 순서: 커밋하기 전에 integration으로 바꾼다(main에는 커밋하지 않는다)
+        self.assertEqual(git("switch", "-qc", "integration").returncode, 0)
         git("add", "-A")
         self.assertEqual(git("commit", "-qm", "chore: 하네스 시작 준비").returncode, 0)
-        self.assertEqual(sched("init").returncode, 2)  # main은 통합 브랜치가 될 수 없다
-        git("switch", "-qc", "integration")
+        self.assertNotEqual(git("rev-parse", "--verify", "-q", "main").returncode, 0)  # main은 비어 있다
         r = sched("init")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout)["integration_branch"], "integration")
+        manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
+        self.assertLess(manager.index("커밋하기 전에** `git switch -c integration`"), manager.index("커밋한다(`chore: 하네스 시작 준비`)"))
 
     def test_gitignore_lines_cover_paths_the_harness_creates(self):
         manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
