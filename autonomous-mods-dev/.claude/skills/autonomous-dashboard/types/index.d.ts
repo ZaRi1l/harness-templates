@@ -139,6 +139,8 @@ export type View = {
   taskMode: TaskMode
   expanded: string | null
   errorsOnly: boolean
+  /** 에이전트 탭에서 대기·끝난 에이전트를 펼칠지 */
+  showDone: boolean
   lastAction: string | null
 }
 

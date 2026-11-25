@@ -197,18 +197,18 @@ test('새 승인·결정 대기만 알린다', async () => {
 
 // ---------------------------------------------------------------- 엔진 위에서
 
-type Calls = { argv: string[][]; live: { snap: Snapshot | string; mtime: number }; clock: ReturnType<typeof mock.clock> }
+type Calls = { argv: string[][]; live: { snap: Snapshot | string; mtime: number }; clock: ReturnType<typeof mock.clock>; agents: { id: string; status: string; taskStatus: string }[] }
 
 // 엔진은 realPath를 실행 중인 OS의 표기로 돌려준다(Windows면 D:\repo\...). 비교할 때는 / 로 맞춘다.
 const slash = (a: string[] | undefined) => a?.map(x => x.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
 
 const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean; sysname?: string; noPathExplorer?: boolean; teammateOnly?: boolean } = {}): Calls => {
-  const calls: Calls = { argv: [], live: { snap, mtime: 1 }, clock: mock.clock(on) }
+  const calls: Calls = { argv: [], live: { snap, mtime: 1 }, clock: mock.clock(on), agents: [] }
   on('command.register', () => ({ value: { command: 'autonomous' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.machine', () => ({ value: { sysname: opts.sysname ?? 'Linux', release: '6', machine: 'x86_64', packageManagers: [], runtimes: [] } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
-  on('agent.list', () => ({ value: [] }))
+  on('agent.list', () => ({ value: calls.agents.map(x => ({ ...x, description: '', type: 'teammate', kind: 'in_process_teammate' as const })) }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
@@ -507,4 +507,31 @@ test('대기열: 펼친 작업에 설계 깊이와 노트를 보인다', async (
   const lines = C.queueLines(snap, 'all', 'API', 120).map(r => r.line.map(s => s.text).join(''))
   expect(lines.some(l => l.includes('설계 standard · 노트 notes/API/design.md'))).toBe(true)
   expect(C.queueLines(SNAP, 'all', 'API', 120).some(r => r.line.map(s => s.text).join('').includes('설계 '))).toBe(false)
+})
+
+test('에이전트 탭: 실행 중을 위에 펼치고, 대기·끝남은 접어 두었다가 펼친다', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  await spawn($, '[auto-task id=API pool=implement attempt=1]\n구현', 'implementer', 'API 구현')
+  await spawn($, '[auto-task id=UI pool=preview attempt=1]\n미리보기', 'designer', 'UI 미리보기')
+  calls.agents = [{ id: 'ag-1', status: 'running', taskStatus: 'running' }, { id: 'ag-2', status: 'idle', taskStatus: 'running' }]
+  await calls.clock.advance(6_000) // 에이전트 목록을 읽는 틱
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-agents' })
+  expect(await ui.find({ type: 'Text', text: /실행 중 1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /implementer\s+API 구현 #1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /designer\s+UI 미리보기 #1/ })).toBeUndefined() // 접혀 있다
+  await ui.press({ key: 'toggle-done' })
+  expect(await ui.find({ type: 'Text', text: /designer\s+UI 미리보기 #1 · 일 끝남/ })).toBeDefined() // 대기 팀원의 머리 줄도 그린다
+  await ui.unmount()
+})
+
+test('결정 버튼을 연달아 눌러도 sched.py는 한 번만 부른다', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-decisions' })
+  await Promise.all([ui.press({ key: 'pick-D-1-A' }), ui.press({ key: 'pick-D-1-A' })])
+  expect(calls.argv.filter(a => a.includes('decide')).length).toBe(1)
+  await ui.unmount()
 })

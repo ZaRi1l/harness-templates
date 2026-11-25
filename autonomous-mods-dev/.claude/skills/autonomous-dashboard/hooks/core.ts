@@ -12,7 +12,7 @@ export const POOLS = ['research', 'design', 'preview', 'implement'] as const
 export const POOL_LABEL: Record<string, string> = {
   research: '조사', design: '설계', preview: '미리보기', implement: '구현', verify: '검증', merge: '통합',
 }
-export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, filter: 'all', taskMode: 'list', expanded: null, errorsOnly: false, lastAction: null }
+export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, filter: 'all', taskMode: 'list', expanded: null, errorsOnly: false, showDone: false, lastAction: null }
 export const EMPTY_META: SnapMeta = { root: null, stateDir: null, readAtMs: 0, checkedMs: 0, mtimeMs: 0, error: null, stale: false }
 
 export type Tone = 'ok' | 'warn' | 'err' | 'dim' | 'accent' | 'info' | 'plain'
@@ -62,6 +62,7 @@ export const normalizeView = (v: unknown): View => {
     taskMode: x.taskMode === 'timeline' ? 'timeline' : 'list',
     expanded: typeof x.expanded === 'string' ? x.expanded : null,
     errorsOnly: x.errorsOnly === true,
+    showDone: x.showDone === true,
     lastAction: typeof x.lastAction === 'string' ? x.lastAction : null,
   }
 }
@@ -748,11 +749,24 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => ({
   tellManager: o.tellManager === true,
 })
 
-export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expanded: string | null): Line[] => {
+/** 대기(idle)·끝난 에이전트 수. 접힌 줄에 쓴다. */
+export const doneCounts = (runs: Run[]) => ({
+  idle: runs.filter(r => r.status === 'idle').length,
+  ended: runs.filter(r => r.status !== 'running' && r.status !== 'idle').length,
+})
+
+/**
+ * 에이전트 목록. 실행 중인 것을 위에 펼치고, 대기·끝난 것은 showDone일 때만 그 아래에 그린다
+ * (섞여 있으면 지금 도는 것이 한눈에 안 보인다).
+ */
+export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expanded: string | null, showDone = false): Line[] => {
   const out: Line[] = []
-  const ordered = [...runningRuns(runs), ...runs.filter(r => r.status !== 'running').reverse()].slice(0, 20)
-  if (ordered.length === 0) out.push([{ text: '이 세션에서 관측한 서브에이전트가 없다', tone: 'dim' }])
-  for (const r of ordered) {
+  const running = runningRuns(runs)
+  const rest = runs.filter(r => r.status !== 'running').reverse()
+  if (runs.length === 0) out.push([{ text: '이 세션에서 관측한 서브에이전트가 없다', tone: 'dim' }])
+  else out.push(head(`실행 중 ${running.length}`))
+  if (runs.length && !running.length) out.push([{ text: '  지금 실행 중인 에이전트가 없다', tone: 'dim' }])
+  const draw = (r: Run) => {
     const tone: Tone = r.status === 'running' ? 'accent' : r.status === 'completed' ? 'ok' : r.status === 'idle' ? 'dim' : 'err'
     const sym = r.status === 'running' ? '●' : r.status === 'completed' ? '✓' : r.status === 'idle' ? '◌' : '✗'
     out.push([
@@ -768,6 +782,12 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
       const t = r.task ? snap?.tasks.find(x => x.id === r.task) : undefined
       if (t) out.push(kv('    브랜치', `${t.branch ?? '-'} @ ${short(t.head)} · 스케줄러 상태 ${t.state}`))
     }
+  }
+  running.slice(0, 20).forEach(draw)
+  if (rest.length) {
+    const c = doneCounts(runs)
+    out.push(head(`대기 ${c.idle} · 끝남 ${c.ended}${showDone ? '' : ' (접힘)'}`))
+    if (showDone) rest.slice(0, 20).forEach(draw)
   }
   const missing = unobservedHolders(snap, runs)
   if (missing.length) {

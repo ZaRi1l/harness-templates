@@ -11,7 +11,8 @@
   next --pool P                지금 시작할 수 있는 작업(research|design|implement|verify|merge)
   start ID --pool P --agent A  작업을 배정한다(중복 배정·경로 충돌·슬롯 초과·미완료 의존·결정 대기·일시 중지를 거부한다).
                                에이전트 지시문 첫 줄에 넣을 marker와 attempt 번호를 돌려준다
-  done ID [--notes PATH]       조사·설계 단계 완료
+  done ID [--notes PATH] [--close]   조사·설계 단계 완료(--close: 구현 없이 작업 완료, 노트 파일 필요)
+  deps ID --set A,B            구현 시작 전에 의존을 바꾼다(순환 검사, 승인·노트는 그대로)
   preview ID --file F          (designer) 미리보기 버전 등록 → AWAITING_APPROVAL
   approve ID [--version N --sha S] / revise ID [--version N] --feedback "..."
                                사용자의 승인 / 수정 요청을 기록한다(버전·해시가 사용자가 본 것과 같아야 한다)
@@ -22,11 +23,11 @@
   snapshot                     스냅샷(dashboard.json)을 다시 만든다
   submit ID                    (작업 worktree에서) 구현 제출 → VERIFYING. 담당 경로 밖 변경을 거부한다
   evidence ID --verifier V --verdict PASS|FAIL --sha SHA   독립 검증 증거 기록
-  fail / block / unblock / cancel ID                        재작업·보류·해제·취소
+  fail / block / unblock / cancel ID                        재작업·보류·해제·취소(승인된 미리보기가 있으면 cancel --force)
   sync ID                      (작업 worktree에서) 통합 브랜치와 이전 작업 브랜치를 병합해 온다
   status [--json] / metrics    현황 / 소요 시간·실패율 등
   recover [--reset-running]    저장된 상태를 실제 Git 상태와 대조해 고친다(세션 재시작 때)
-  cleanup [ID...]              통합이 끝난 작업의 worktree·브랜치를 조건을 확인하고 지운다
+  cleanup [ID...] [--dry-run]  통합이 끝난 작업의 worktree·브랜치를 조건을 확인하고 지운다(--dry-run: 목록만)
   limit POOL N / notes-dir ID  슬롯 수 조절 / 작업별 조사·설계 노트 폴더
 
 종료 코드: 0 성공, 2 거부(사유를 stderr에 쓴다).
@@ -595,6 +596,10 @@ def cmd_done(a, root, cfg):
                 t["state"] == "BLOCKED" and (t["researched"] or t["designed"]))
             if not ok:
                 raise Refused(f"{t['id']}는 조사·설계 단계가 아니다({t['state']})")
+            for n in ([a.notes] if a.notes else []) + t["notes"]:
+                f = Path(n) if Path(n).is_absolute() else root / n
+                if not f.is_file():
+                    raise Refused(f"{t['id']}: 노트 파일이 없다: {n}. 결과를 파일로 쓴 뒤 닫는다(메시지만으로는 남지 않는다)")
             if a.notes:
                 t["notes"].append(a.notes)
             transition(t, "COMPLETED", "조사·설계만 하는 작업 완료", force=True)
@@ -807,7 +812,35 @@ def cmd_unblock(a, root, cfg):
 def cmd_cancel(a, root, cfg):
     with store(root) as st:
         t = get(st, a.id)
+        # autonomous-mods-dev 추가: 승인된 미리보기를 취소·재등록으로 잃지 않게 한다(의존 변경은 `deps`로)
+        if t["preview"]["approved"] is not None and not a.force:
+            raise Refused(f"{t['id']}에는 승인된 미리보기(v{t['preview']['approved']})가 있다. "
+                          "의존만 바꾸려면 `sched deps`를 쓴다. 정말 취소하려면 --force")
         transition(t, "CANCELLED", a.reason)
+        return brief(t)
+
+
+DEPS_LOCKED = {"IMPLEMENTING", "VERIFYING", "READY_TO_MERGE", "MERGING", "COMPLETED", "CANCELLED"}
+
+
+def cmd_deps(a, root, cfg):
+    """autonomous-mods-dev 추가: 구현을 시작하기 전 작업의 의존을 바꾼다. 미리보기 승인·노트·결정은 그대로다."""
+    with store(root) as st:
+        t = get(st, a.id)
+        if t["state"] in DEPS_LOCKED:
+            raise Refused(f"{t['id']}는 {t['state']} 상태라 의존을 바꿀 수 없다(구현을 시작하기 전에만)")
+        new = [d.strip() for d in a.set.split(",") if d.strip()]
+        for d in new:
+            if d not in st["tasks"]:
+                raise Refused(f"의존 작업이 없다: {d}")
+            if d == t["id"]:
+                raise Refused("자기 자신에 의존할 수 없다")
+        tasks = {k: (dict(v, deps=new) if k == t["id"] else v) for k, v in st["tasks"].items()}
+        check_cycles(tasks)
+        old = t["deps"]
+        t["deps"] = new
+        text = f"의존 변경 {old} → {new}" + (f": {a.reason}" if a.reason else "")
+        st["notes_log"] = (st["notes_log"] + [{"at": now(), "kind": "split", "text": text, "task": t["id"]}])[-NOTES_KEPT:]
         return brief(t)
 
 
@@ -1237,7 +1270,8 @@ def main() -> int:
     cmd("fail", cmd_fail, ID, (("--reason",), {"required": True}))
     cmd("block", cmd_block, ID, (("--reason",), {"required": True}))
     cmd("unblock", cmd_unblock, ID, REASON, (("--reset-retries",), {"action": "store_true"}))
-    cmd("cancel", cmd_cancel, ID, REASON)
+    cmd("cancel", cmd_cancel, ID, REASON, (("--force",), {"action": "store_true"}))
+    cmd("deps", cmd_deps, ID, (("--set",), {"required": True}), REASON)
     cmd("sync", cmd_sync, ID)
     cmd("status", cmd_status, (("--json",), {"action": "store_true"}), (("--brief",), {"action": "store_true"}))
     cmd("recover", cmd_recover, (("--reset-running",), {"action": "store_true"}))

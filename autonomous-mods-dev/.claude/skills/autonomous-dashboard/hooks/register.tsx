@@ -15,7 +15,7 @@ const snapA = atom({ plugin: 'autonomous-dashboard', key: 'snap' } as const, nul
 const metaA = atom({ plugin: 'autonomous-dashboard', key: 'meta' } as const, C.EMPTY_META, { shape: 'meta-2' })
 const runsA = atom({ plugin: 'autonomous-dashboard', key: 'runs' } as const, [] as Run[], { shape: 'runs-3' })
 const activityA = atom({ plugin: 'autonomous-dashboard', key: 'activity' } as const, [] as Activity[], { shape: 'activity-1' })
-const viewA = atom({ plugin: 'autonomous-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-2' })
+const viewA = atom({ plugin: 'autonomous-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-3' })
 const usageA = atom({ plugin: 'autonomous-dashboard', key: 'usage' } as const, { costUsd: null, contextPct: null } as Usage, { shape: 'usage-1' })
 
 const TONE_COLOR: Record<C.Tone, string | undefined> = {
@@ -26,6 +26,7 @@ const TONE_COLOR: Record<C.Tone, string | undefined> = {
 let cfg: C.Config = C.parseConfig({})
 let sysname = ''
 let polling = false
+const inflight = new Set<string>() // 실행 중인 상태 변경. 같은 버튼을 연달아 눌러도 한 번만 보낸다
 let pollSince = 0 // 읽기가 걸려 끝나지 않으면 이 시각부터 30초 뒤 다시 허용한다
 let tick = 0
 let timer: { cancel: () => void } | null = null
@@ -225,7 +226,10 @@ async function act($: EngineInterface, a: C.Action): Promise<string> {
   if (!cfg.allowActions) return '읽기 전용 설정(allowActions=false)이다. manager에게 말하거나 CLI로 실행한다'
   const built = C.schedArgs(a, await read($, snapA))
   if ('error' in built) return built.error
-  const r = await runSched($, built.args)
+  const key = built.args.join('\u0000')
+  if (inflight.has(key)) return '같은 요청을 처리하는 중이다'
+  inflight.add(key)
+  const r = await runSched($, built.args).finally(() => inflight.delete(key))
   const now = await $.clock.now()
   const label = `sched ${built.args.slice(0, 3).join(' ')}`
   log(r.ok ? 'info' : 'error', 'mod', 'task' in a ? a.task : null, `${label}: ${r.ok ? '완료' : C.fit(r.text, 120)}`, now)
@@ -651,7 +655,15 @@ export const register: Register = (on, options) => {
         case 'tasks':
           return tasksTab()
         case 'agents':
-          return lines(C.agentLines(snap, runs, now, view.expanded).map(l => C.fitLine(l, width)))
+          return (
+            <Box flexDirection="column">
+              {runs.some(r => r.status !== 'running') && (
+                <Button key="toggle-done" label={view.showDone ? '대기·끝남 접기' : `대기·끝남 펼치기 (${runs.filter(r => r.status !== 'running').length})`}
+                  onPress={() => setView($, v => ({ ...v, showDone: !v.showDone }))} />
+              )}
+              {lines(C.agentLines(snap, runs, now, view.expanded, view.showDone).map(l => C.fitLine(l, width)))}
+            </Box>
+          )
         case 'decisions':
           return decisions()
         case 'git':
@@ -678,7 +690,7 @@ export const register: Register = (on, options) => {
             <Box flexDirection="column" width={left}>{body(view.tab, left)}</Box>
             <Box flexDirection="column" width={right}>
               {line(C.section('에이전트', right))}
-              {lines(C.agentLines(snap, runs, now, null).slice(0, 12).map(l => C.fitLine(l, right)))}
+              {lines(C.agentLines(snap, runs, now, null, false).slice(0, 14).map(l => C.fitLine(l, right)))}
             </Box>
           </Box>
           {footer}

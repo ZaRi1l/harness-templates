@@ -168,21 +168,29 @@ class TestPauseAndPriority(ModsCase):
 class TestCloseResearch(ModsCase):
     """조사·설계만 하는 작업은 구현 단계 없이 결과 노트와 함께 완료로 닫는다."""
 
+    def note(self, rel="notes/ENV.md"):
+        path = self.repo.path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# 결과\n", encoding="utf-8")
+        return rel
+
     def test_close_research_stage_with_notes(self):
         self.add("ENV", profile="research", paths="docs/env.md")
         self.add("CORE", deps="ENV")
         self.ok("start", "ENV", "--pool", "research", "--agent", "r")
         self.assertIn("노트", self.refused("done", "ENV", "--close"))  # 결과 없이 닫지 않는다
-        out = self.ok("done", "ENV", "--close", "--notes", "notes/ENV.md")
+        # e2e3: 결과를 메시지로만 보내고 파일은 없었다. 노트 경로만 적고 파일이 없으면 닫지 않는다
+        self.assertIn("파일", self.refused("done", "ENV", "--close", "--notes", "notes/ENV.md"))
+        out = self.ok("done", "ENV", "--close", "--notes", self.note())
         self.assertEqual(out["state"], "COMPLETED")
         self.assertEqual(self.ok("next", "--pool", "implement")["dispatch"][0]["id"], "CORE")  # 의존이 풀린다
 
     def test_close_blocked_research_without_branch(self):
         self.add("ENV", profile="research", paths="docs/env.md")
         self.ok("start", "ENV", "--pool", "research", "--agent", "r")
-        self.ok("done", "ENV", "--notes", "notes/ENV.md")
+        self.ok("done", "ENV", "--notes", self.note())
         self.ok("block", "ENV", "--reason", "구현 불필요")
-        self.assertEqual(self.ok("done", "ENV", "--close", "--notes", "notes/ENV.md")["state"], "COMPLETED")
+        self.assertEqual(self.ok("done", "ENV", "--close")["state"], "COMPLETED")  # 앞서 적은 노트 파일이 있다
 
     def test_close_refuses_work_with_branch(self):
         self.add("A")
@@ -216,6 +224,38 @@ class TestNeedsDesign(ModsCase):
         out = self.add("X", risk="low")
         self.assertEqual(out["state"], "READY")
         self.assertIsNone(self.task(self.snapshot(), "X")["design_depth"])
+
+
+class TestDepsCommand(ModsCase):
+    """e2e3: 의존을 바꿀 명령이 없어 manager가 작업을 취소·재등록했고, 승인된 미리보기 연결이 끊겼다."""
+
+    def test_change_deps_before_implementation(self):
+        self.add("A")
+        self.add("B", paths="b/")
+        self.add("C", paths="c/", deps="A")
+        self.assertEqual(self.ok("deps", "C", "--set", "B")["deps"], ["B"])
+        self.assertEqual(self.ok("deps", "C", "--set", "")["deps"], [])
+        self.assertIn("C", [t["id"] for t in self.ok("next", "--pool", "implement")["dispatch"]])
+        self.assertIn("없다", self.refused("deps", "C", "--set", "NOPE"))
+        self.ok("deps", "B", "--set", "A")
+        self.assertIn("순환", self.refused("deps", "A", "--set", "B"))
+        self.assertEqual(self.state("A")["deps"], [])  # 거부되면 그대로
+
+    def test_refuse_after_work_started(self):
+        self.add("A")
+        self.add("B", paths="b/")
+        self.ok("start", "A", "--pool", "implement", "--agent", "i")
+        self.assertIn("IMPLEMENTING", self.refused("deps", "A", "--set", "B"))
+
+    def test_keeps_preview_approval_and_cancel_guard(self):
+        shas = self.preview_ready()
+        self.ok("approve", "UI", "--version", "1", "--sha", shas[0][:12])
+        self.add("API", paths="api/")
+        self.ok("deps", "UI", "--set", "API")
+        ui = self.state("UI")
+        self.assertEqual((ui["deps"], ui["preview"]["approved"]), (["API"], 1))  # 승인은 그대로
+        self.assertIn("승인된 미리보기", self.refused("cancel", "UI", "--reason", "다시 등록"))
+        self.assertEqual(self.ok("cancel", "UI", "--reason", "범위 제외", "--force")["state"], "CANCELLED")
 
 
 class TestCleanupDryRun(ModsCase):
@@ -396,6 +436,19 @@ class TestAgentSkills(unittest.TestCase):
             seen[agent.stem] = skills
         self.assertEqual(seen["architect"], ["architecture-design"])
         self.assertEqual(seen["designer"], ["preview-workflow"])
+
+    def test_ai_docs_folder_is_committed_and_skips_tests(self):
+        """AI 문서는 docs/ai-harness/에 커밋하고(worktree에서 보이게), 문서만 바뀌면 테스트를 돌리지 않는다."""
+        root = self.CLAUDE.parent
+        rules = (root / "CLAUDE.md").read_text(encoding="utf-8")
+        for folder in ("requirements/", "research/", "design/", "reports/"):
+            self.assertIn(f"`{folder}`", rules)
+        for agent, folder in (("manager", "requirements/"), ("researcher", "research/"), ("architect", "design/")):
+            self.assertIn(f"docs/ai-harness/{folder}", (self.CLAUDE / "agents" / f"{agent}.md").read_text(encoding="utf-8"), agent)
+        cfg = json.loads((self.CLAUDE / "hooks/verify.config.json").read_text(encoding="utf-8"))
+        self.assertTrue(any("docs/ai-harness/x.md".startswith(p) for p in cfg["ignored_prefixes"]))
+        gitignore = root / ".gitignore"
+        self.assertFalse(gitignore.exists() and "docs" in gitignore.read_text(encoding="utf-8"))
 
     def test_skill_references_resolve(self):
         for skill in (self.CLAUDE / "skills").glob("*/SKILL.md"):
