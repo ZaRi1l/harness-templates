@@ -26,6 +26,7 @@ const TONE_COLOR: Record<C.Tone, string | undefined> = {
 let cfg: C.Config = C.parseConfig({})
 let sysname = ''
 let polling = false
+let pollSince = 0 // 읽기가 걸려 끝나지 않으면 이 시각부터 30초 뒤 다시 허용한다
 let tick = 0
 let timer: { cancel: () => void } | null = null
 const pendingTools = new Map<string, C.ToolBatch>() // 도구 호출마다 상태를 쓰지 않고 틱마다 모아 쓴다
@@ -96,12 +97,13 @@ async function discover($: EngineInterface, cwd?: string) {
 
 /** 스냅샷 파일이 바뀌었을 때만 읽는다. 읽기에 실패하면 이전 스냅샷을 두고 stale로 표시한다(작업 상태로 바꾸지 않는다). */
 async function poll($: EngineInterface, force = false) {
-  if (polling) return
+  const now = await $.clock.now()
+  if (polling && now - pollSince < 30_000) return
   polling = true
+  pollSince = now
   try {
     const m = await read($, metaA)
     if (!m.stateDir) return
-    const now = await $.clock.now()
     await update($, metaA, x => ({ ...x, checkedMs: now })) // 바뀐 것이 없어도 확인했다는 표시(화면의 실시간 표시가 돈다)
     const file = `${m.stateDir}/dashboard.json`
     const [st, errSt] = await Promise.all([
@@ -186,6 +188,16 @@ async function observe($: EngineInterface) {
   }
   const u = await $.session.usage().catch(() => null)
   if (u) await update($, usageA, () => ({ costUsd: u.cost?.usd ?? null, contextPct: u.context.percent ?? null }))
+}
+
+/**
+ * 갱신 타이머를 켠다. 파일을 고치면 Mod가 다시 불러와지고(리로드) 그때 타이머가 멈춘다.
+ * 세션 시작이 다시 오지 않아도 되살아나게 자주 오는 Hook(도구 호출, 에이전트, 명령, 그리기)에서 부른다.
+ */
+function ensureTimer($: EngineInterface) {
+  if (timer) return
+  timer = $.clock.every(cfg.refreshMs, () => void onTick($).catch(() => undefined))
+  if (!sysname) void $.session.machine().then(m => { sysname = m?.sysname ?? sysname }).catch(() => undefined)
 }
 
 async function onTick($: EngineInterface) {
@@ -303,7 +315,8 @@ export const register: Register = (on, options) => {
       await runSched($, ['snapshot']) // 상태는 있는데 스냅샷만 없을 때. 작업 상태는 바꾸지 않는다
     }
     timer?.cancel()
-    timer = $.clock.every(cfg.refreshMs, () => void onTick($).catch(() => undefined))
+    timer = null
+    ensureTimer($)
     if (cfg.openOnStart && e.isInteractive) void openPane($).catch(() => undefined)
     await showStatus($)
     return next(e)
@@ -320,6 +333,7 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     const started = await next(e)
     try {
+      ensureTimer($)
       if (started.deny === undefined && started.agentId) {
         const id = started.agentId
         const now = await $.clock.now()
@@ -346,6 +360,7 @@ export const register: Register = (on, options) => {
   on('agent.report', async ($, e, next) => {
     const done = await next(e)
     try {
+      ensureTimer($)
       const now = await $.clock.now()
       const status: Run['status'] = e.status === 'completed' ? 'completed' : e.status === 'stopped' ? 'stopped' : 'failed'
       let task: string | null = null
@@ -367,6 +382,7 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     try {
+      ensureTimer($)
       const failed = ran.deny !== undefined || ran.isError === true
       if (e.agentId) {
         const summary = C.toolSummary(String(e.tool), e as unknown as Record<string, unknown>, cfg.toolDetail)
@@ -382,6 +398,8 @@ export const register: Register = (on, options) => {
   // ---------------------------------------------------------------- 명령
 
   on('command.run', { command: 'autonomous' }, async ($, e) => {
+    ensureTimer($)
+    if (!(await read($, metaA)).stateDir) await discover($) // 리로드 뒤 처음 명령이면 저장소를 다시 찾는다
     const a = C.parseCommand(e.args)
     const say = (text: string) => ({ text, isTextDisplayOnly: true as const })
     switch (a.kind) {
@@ -415,6 +433,7 @@ export const register: Register = (on, options) => {
   // ---------------------------------------------------------------- 그리기 (읽기만 한다)
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    ensureTimer($) // 그리기는 상태를 쓰지 않는다. 타이머만 켠다(이미 있으면 아무것도 안 한다)
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const Input = 'Input' in els ? els.Input : null

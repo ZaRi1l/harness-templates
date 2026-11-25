@@ -431,3 +431,16 @@ test('Windows: PATH에 explorer.exe가 없어도 절대 경로로 열고, 실패
   expect(r.text).toContain('기본 브라우저')
   expect(calls.argv.some(a => a[0] === 'C:\\Windows\\explorer.exe')).toBe(true)
 })
+
+test('세션 시작 없이 다시 불러와져도(리로드) 다른 Hook에서 갱신 타이머를 다시 켠다', async ($, on) => {
+  const calls = engine(on)
+  // 리로드 뒤처럼: 저장된 상태로 Pane을 그리지만 session.start는 다시 오지 않는다
+  await $.command.run({ command: 'autonomous', args: 'refresh', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const live = async () => (await ui.find({ type: 'Text', text: /실시간/ }))?.text
+  const before = await live()
+  expect(before).toBeDefined()
+  await calls.clock.advance(2_000)
+  expect(await live()).not.toBe(before)
+  await ui.unmount()
+})
