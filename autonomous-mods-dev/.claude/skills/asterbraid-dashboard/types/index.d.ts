@@ -1,4 +1,4 @@
-// autonomous-dashboard의 상태 계약. 스냅샷 타입은 sched.py snapshot()의 schema_version 1을 따른다.
+// asterbraid-dashboard의 상태 계약. 스냅샷 타입은 sched.py snapshot()의 schema_version 1을 따른다.
 
 export type TaskState =
   | 'PENDING' | 'RESEARCHING' | 'DESIGNING' | 'PREVIEWING' | 'AWAITING_APPROVAL' | 'READY' | 'IMPLEMENTING'
@@ -148,7 +148,7 @@ export type Usage = { costUsd: number | null; contextPct: number | null }
 
 declare module 'claude-code' {
   interface PluginState {
-    'autonomous-dashboard': {
+    'asterbraid-dashboard': {
       snap: Shaped<Snapshot | null>
       meta: Shaped<SnapMeta>
       runs: Shaped<Run[]>

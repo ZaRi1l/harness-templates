@@ -238,18 +238,18 @@ const version = (w: string | undefined) => {
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
 
 export const HELP = [
-  '/autonomous                       관제 Pane 열기 (open과 같다)',
-  '/autonomous close                 Pane만 닫는다. 개발은 계속된다',
-  '/autonomous status|tasks|agents|decisions|git|activity|commands   해당 탭 (queue·timeline·metrics·errors도 된다)',
-  '/autonomous preview [ID [vN]]     브라우저로 미리보기 대시보드 / 작업의 최신·특정 버전 열기',
-  '/autonomous refresh               스냅샷을 다시 만들고 읽는다',
-  '/autonomous layout auto|mini|compact|wide',
-  '/autonomous approve ID vN         사용자가 본 버전 승인 (해시를 함께 기록)',
-  '/autonomous revise ID vN 피드백    수정 요청',
-  '/autonomous decide D-ID KEY [메모] 사용자 결정 기록',
-  '/autonomous pause [사유] | resume  새 배정만 멈춤 / 재개 (실행 중인 에이전트는 계속)',
-  '/autonomous limit POOL N | priority ID N',
-  '/autonomous unblock ID            보류 해제 (sched.py가 재작업·준비 상태로 되돌린다)',
+  '/asterbraid                       관제 Pane 열기 (open과 같다)',
+  '/asterbraid close                 Pane만 닫는다. 개발은 계속된다',
+  '/asterbraid status|tasks|agents|decisions|git|activity|commands   해당 탭 (queue·timeline·metrics·errors도 된다)',
+  '/asterbraid preview [ID [vN]]     브라우저로 미리보기 대시보드 / 작업의 최신·특정 버전 열기',
+  '/asterbraid refresh               스냅샷을 다시 만들고 읽는다',
+  '/asterbraid layout auto|mini|compact|wide',
+  '/asterbraid approve ID vN         사용자가 본 버전 승인 (해시를 함께 기록)',
+  '/asterbraid revise ID vN 피드백    수정 요청',
+  '/asterbraid decide D-ID KEY [메모] 사용자 결정 기록',
+  '/asterbraid pause [사유] | resume  새 배정만 멈춤 / 재개 (실행 중인 에이전트는 계속)',
+  '/asterbraid limit POOL N | priority ID N',
+  '/asterbraid unblock ID            보류 해제 (sched.py가 재작업·준비 상태로 되돌린다)',
 ]
 
 export const parseCommand = (args: string): Action => {
@@ -276,19 +276,19 @@ export const parseCommand = (args: string): Action => {
     const [task, v, ...fb] = rest
     if (!task || !ID.test(task)) return { kind: 'error', message: `${head} 뒤에 작업 ID를 쓴다` }
     const n = version(v)
-    if (n === null || Number.isNaN(n)) return { kind: 'error', message: `${head}는 사용자가 본 버전을 함께 쓴다: /autonomous ${head} ${task} v2` }
+    if (n === null || Number.isNaN(n)) return { kind: 'error', message: `${head}는 사용자가 본 버전을 함께 쓴다: /asterbraid ${head} ${task} v2` }
     if (head === 'approve') return { kind: 'approve', task, version: n }
     const feedback = fb.join(' ').trim()
     return feedback ? { kind: 'revise', task, version: n, feedback } : { kind: 'error', message: '수정 요청 내용을 쓴다' }
   }
   if (head === 'decide') {
     const [id, choice, ...note] = rest
-    if (!id || !ID.test(id) || !choice) return { kind: 'error', message: '/autonomous decide D-1 A [메모]' }
+    if (!id || !ID.test(id) || !choice) return { kind: 'error', message: '/asterbraid decide D-1 A [메모]' }
     return { kind: 'decide', id, choice, note: note.join(' ') }
   }
   if (head === 'unblock') {
     const [task] = rest
-    return task && ID.test(task) ? { kind: 'unblock', task } : { kind: 'error', message: '/autonomous unblock ID' }
+    return task && ID.test(task) ? { kind: 'unblock', task } : { kind: 'error', message: '/asterbraid unblock ID' }
   }
   if (head === 'pause') return { kind: 'pause', reason: rest.join(' ') }
   if (head === 'resume') return { kind: 'resume' }
@@ -297,16 +297,16 @@ export const parseCommand = (args: string): Action => {
     const k = Number(n)
     return pool && [...POOLS, 'verify'].includes(pool as never) && Number.isInteger(k) && k >= 1 && k <= 16
       ? { kind: 'limit', pool, n: k }
-      : { kind: 'error', message: '/autonomous limit research|design|preview|implement|verify N(1~16)' }
+      : { kind: 'error', message: '/asterbraid limit research|design|preview|implement|verify N(1~16)' }
   }
   if (head === 'priority') {
     const [task, n] = rest
     const k = Number(n)
     return task && ID.test(task) && Number.isInteger(k) && Math.abs(k) <= 1000
       ? { kind: 'priority', task, n: k }
-      : { kind: 'error', message: '/autonomous priority ID N' }
+      : { kind: 'error', message: '/asterbraid priority ID N' }
   }
-  return { kind: 'error', message: `모르는 명령: ${head}. /autonomous help` }
+  return { kind: 'error', message: `모르는 명령: ${head}. /asterbraid help` }
 }
 
 /**
@@ -401,7 +401,7 @@ export const isPreviewFile = (file: string) => /\.html?$/i.test(file)
 
 /** 열 미리보기 파일. 작업이 없으면 대시보드, 버전이 없으면 최신 버전. */
 export const previewTarget = (snap: Snapshot | null, task: string | null, version: number | null): { file: string; label: string } | { error: string } => {
-  if (!snap) return { error: '스케줄러 스냅샷이 없다. /autonomous refresh' }
+  if (!snap) return { error: '스케줄러 스냅샷이 없다. /asterbraid refresh' }
   if (!task) return { file: snap.dashboard_html, label: '미리보기 대시보드' }
   const t = snap.tasks.find(x => x.id === task)
   if (!t) return { error: `작업이 없다: ${task}` }
@@ -602,7 +602,7 @@ export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: nu
     ? { text: '✗ 갱신 실패', tone: 'err', bold: true }
     : { text: `${SPIN[Math.floor(meta.checkedMs / Math.max(1, refreshMs)) % SPIN.length]} 실시간 · 변화 ${ago(ms(snap.generated_at), now)}`, tone: 'ok' }
   const left = fitLine(
-    [{ text: 'AUTONOMOUS ', tone: 'accent', bold: true }, { text: `${snap.project.name} · ${snap.integration.branch ?? '통합 브랜치 없음'} ${short(snap.integration.head)}`, tone: 'dim' }],
+    [{ text: 'ASTERBRAID ', tone: 'accent', bold: true }, { text: `${snap.project.name} · ${snap.integration.branch ?? '통합 브랜치 없음'} ${short(snap.integration.head)}`, tone: 'dim' }],
     Math.max(0, width - strWidth(live.text) - 1),
   )
   const lines: Line[] = [[...left, { text: ' '.repeat(Math.max(1, width - lineWidth(left) - strWidth(live.text))) }, live]]

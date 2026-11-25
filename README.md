@@ -14,14 +14,14 @@ Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를
 | [`verified-parallel-dev`](verified-parallel-dev/) | manager + worktree implementer(최대 3) + verifier | 병렬 | 중간 | 높음 | 경로가 나뉜 큰 작업, 변환기·마이그레이션 |
 | [`continuous-parallel-dev`](continuous-parallel-dev/) | verified-parallel-dev + 작업 대기열 + 검증 게이트 자동 통합 | 병렬, 지속 | 높음 | 높음 | 기능을 계속 쌓아 가는 장기 개발 |
 | [`autonomous-parallel-dev`](autonomous-parallel-dev/) | 결정론적 스케줄러 + 조사·설계·미리보기 승인 + 임시 worktree 통합 | 병렬, 자율 | 가장 높음 | 높음 | 작업이 많고 오래 이어지는 프로젝트, 사용자 개입을 줄이고 싶을 때 |
-| [`autonomous-mods-dev`](autonomous-mods-dev/) | autonomous-parallel-dev + Claude Code Mod 관제 Pane + 구조화된 사용자 결정 + 해시로 묶은 미리보기 승인 | 병렬, 자율 | 가장 높음 | 높음 | 위와 같되 manager와 대화하며 진행을 지켜보고 결정·검토를 자주 할 때 (Mods 필요) |
+| [`autonomous-mods-dev`](autonomous-mods-dev/) (**AsterBraid**) | autonomous-parallel-dev + Claude Code Mod 관제 Pane + 구조화된 사용자 결정 + 해시로 묶은 미리보기 승인 | 병렬, 자율 | 가장 높음 | 높음 | 위와 같되 manager와 대화하며 진행을 지켜보고 결정·검토를 자주 할 때 (Mods 필요) |
 | [`team-shared-dev`](team-shared-dev/) | Agent Teams, 작업 폴더 공유, 작업 Hook | 팀 3~5 | 높음 | 중간 | 파일 경계가 뚜렷한 새 기능 |
 | [`team-hybrid-dev`](team-hybrid-dev/) | 조사·검증은 팀원, 구현은 worktree | 팀 + 병렬 | 가장 높음 | 가장 높음 | 조사가 먼저 필요하고 틀리면 안 되는 큰 작업 |
 
 고르는 법: 먼저 `solo-guarded-dev`로 시작하고, 작업을 독립 경로로 나눌 수 있을 때 `verified-parallel-dev`로 올린다.
 작업이 계속 이어지고 검증된 것부터 쌓아 가고 싶으면 `continuous-parallel-dev`를 쓴다(`main` 반영은 여전히 사람이 한다).
 조사·설계·미리보기 승인까지 맡기고 상태·병합을 프로그램으로 강제하려면 `autonomous-parallel-dev`를 쓴다(실제 세션 검증 전).
-그 진행을 Claude Code 안의 관제 화면으로 보고 결정·검토를 화면에서도 하려면 `autonomous-mods-dev`를 쓴다(Mods API early access, 2.1.331에서 검증. 실제 세션에서 템플릿과 설계 문서만으로 작은 앱을 끝까지 만들어 통합하는 것을 확인했다).
+그 진행을 Claude Code 안의 관제 화면으로 보고 결정·검토를 화면에서도 하려면 `autonomous-mods-dev`(AsterBraid)를 쓴다(Mods API early access, 2.1.331에서 검증. 실제 세션에서 템플릿과 설계 문서만으로 작은 앱을 끝까지 만들어 통합하는 것을 확인했다).
 팀 템플릿 두 개는 Claude Code의 **실험 기능**(Agent Teams)에 의존한다.
 
 ```mermaid

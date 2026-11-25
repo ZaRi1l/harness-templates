@@ -2,7 +2,7 @@
 <!--
   미리보기 대시보드의 화면 소스. `sched.py dashboard`가 아래 auto-data 스크립트 블록에 스냅샷 JSON을 넣어
   <git common dir>/claude-auto/previews/index.html 로 기록한다. 이 파일을 고치면 다음 dashboard부터 반영된다.
-  읽기 전용 페이지다: 승인·수정 요청·결정은 CLI, manager, /autonomous 화면에서만 기록한다.
+  읽기 전용 페이지다: 승인·수정 요청·결정은 CLI, manager, /asterbraid 화면에서만 기록한다.
   사용자 문자열은 textContent로만 넣는다(innerHTML 금지). 미리보기는 sandbox iframe으로만 띄운다.
 -->
 <html lang="ko">
@@ -33,7 +33,7 @@
 <h1>Development Preview</h1>
 <p id="meta" class="muted"></p>
 <p>이 페이지는 읽기 전용이다. 승인·수정 요청·결정은 아래 명령을 터미널에서 실행하거나 manager 또는
-<code>/autonomous</code> 화면에서 한다. 명령에는 사용자가 본 버전과 해시가 들어 있어, 그 사이 새 버전이 등록되면 거부된다.</p>
+<code>/asterbraid</code> 화면에서 한다. 명령에는 사용자가 본 버전과 해시가 들어 있어, 그 사이 새 버전이 등록되면 거부된다.</p>
 <input id="q" placeholder="작업 ID·제목·상태로 찾기" aria-label="찾기">
 <h2>미리보기</h2><div id="previews"></div>
 <h2>사용자 결정</h2><div id="decisions"></div>

@@ -1,5 +1,5 @@
 ---
-name: harness-bootstrap
+name: asterbraid-bootstrap
 description: autonomous-mods-dev의 시작 준비(처음 한 번). 템플릿과 설계 문서만 있는 새 저장소, 또는 하네스를 이식한 기존 프로젝트에서 manager가 CLAUDE.md·verify.config.json·.gitignore를 채우고(기존 내용은 살린다), integration 브랜치를 만들고, 기준선 테스트를 확인하고, sched init까지 할 때 쓴다.
 ---
 
@@ -18,7 +18,7 @@ description: autonomous-mods-dev의 시작 준비(처음 한 번). 템플릿과 
      커밋 규칙에 이 세션이 받은 attribution 줄(`Co-Authored-By: …`)을 옮겨 적지 않는다(클라이언트·모델마다 다르다).
    - `.claude/hooks/verify.config.json`: 아래 표. 언어와 테스트 도구는 설계 문서를 따른다.
    - `.gitignore`: `.claude/settings.local.json`, `.claude/worktrees/`, 언어별 산출물(예: `__pycache__/`, `.no-pycache/`, `node_modules/`).
-     `docs/ai-harness/`는 무시하지 않는다(커밋한다). `verify.config.json`의 `ignored_prefixes`에 `docs/`(또는 `docs/ai-harness/`)를 남겨 문서만 바뀌면 테스트를 건너뛰게 한다.
+     `docs/asterbraid/`는 무시하지 않는다(커밋한다). `verify.config.json`의 `ignored_prefixes`에 `docs/`(또는 `docs/asterbraid/`)를 남겨 문서만 바뀌면 테스트를 건너뛰게 한다.
 3. 바꿀 내용을 한 번에 요약해 `AskUserQuestion`으로 확인받는다(추천을 첫 선택지로). 여기서는 설정만 묻는다.
    설계 결정(저장 방식, 화면 방향 등)은 8 뒤에 `sched decide add`로 연 다음 묻는다(관제 화면과 기록에 남게).
 4. 적용한다. `verify.config.json` 수정은 승인 창이 뜬다. 패키지는 설치하지 않는다(필요하면 사용자에게 명령을 알린다).

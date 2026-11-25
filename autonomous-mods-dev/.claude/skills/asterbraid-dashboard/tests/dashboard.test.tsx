@@ -204,11 +204,11 @@ const slash = (a: string[] | undefined) => a?.map(x => x.replace(/\\/g, '/').rep
 
 const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean; sysname?: string; noPathExplorer?: boolean; teammateOnly?: boolean } = {}): Calls => {
   const calls: Calls = { argv: [], live: { snap, mtime: 1 }, clock: mock.clock(on), agents: [] }
-  on('command.register', () => ({ value: { command: 'autonomous' } }))
+  on('command.register', () => ({ value: { command: 'asterbraid' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.machine', () => ({ value: { sysname: opts.sysname ?? 'Linux', release: '6', machine: 'x86_64', packageManagers: [], runtimes: [] } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
-  on('agent.list', () => ({ value: calls.agents.map(x => ({ ...x, description: '', type: 'teammate', kind: 'in_process_teammate' as const })) }))
+  on('agent.list', () => ({ value: calls.agents.map(x => ({ ...x, description: '', type: 'teammate', kind: 'in_process_teammate' })) as never }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.close', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
@@ -232,13 +232,13 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
 }
 
 const PANE = {
-  plugin: 'autonomous-dashboard', component: 'Pane', requestId: 'autonomous',
-  props: { title: 'Autonomous', isFocused: false, bodyColumns: 72, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+  plugin: 'asterbraid-dashboard', component: 'Pane', requestId: 'asterbraid',
+  props: { title: 'AsterBraid', isFocused: false, bodyColumns: 72, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
 } as const
 
 const start = ($: Engine) => $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
 const command = ($: Engine, args: string) =>
-  $.command.run({ command: 'autonomous', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
+  $.command.run({ command: 'asterbraid', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
 const spawn = ($: Engine, prompt: string, subagentType: string, description: string) =>
   $.agent.spawn({
     prompt, subagentType, description, tool_use_id: `tu-${description}`, provider: { plugin: 'engine', tier: 'core' },
@@ -435,7 +435,7 @@ test('Windows: PATH에 explorer.exe가 없어도 절대 경로로 열고, 실패
 test('세션 시작 없이 다시 불러와져도(리로드) 다른 Hook에서 갱신 타이머를 다시 켠다', async ($, on) => {
   const calls = engine(on)
   // 리로드 뒤처럼: 저장된 상태로 Pane을 그리지만 session.start는 다시 오지 않는다
-  await $.command.run({ command: 'autonomous', args: 'refresh', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
+  await $.command.run({ command: 'asterbraid', args: 'refresh', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const live = async () => (await ui.find({ type: 'Text', text: /실시간/ }))?.text
   const before = await live()

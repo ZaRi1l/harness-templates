@@ -30,9 +30,9 @@
 
 메인 체크아웃은 **통합 브랜치**(예: `integration`)에 둔다.
 
-관제 화면: `/autonomous` (autonomous-dashboard Mod). 없어도 개발은 그대로 돈다.
+관제 화면: `/asterbraid` (asterbraid-dashboard Mod). 없어도 개발은 그대로 돈다.
 
-## AI 문서 (`docs/ai-harness/`, 커밋한다)
+## AI 문서 (`docs/asterbraid/`, 커밋한다)
 | 폴더 | 쓰는 쪽 | 내용 |
 |---|---|---|
 | `requirements/` | manager | 요구 분석: 출처(문서·대화), 적힌 것 → 작업, 추론과 근거, 미정 → 결정. 문서로 받은 요구는 복사하지 않고 가리킨다 |
@@ -40,7 +40,7 @@
 | `design/` | architect | 설계·계약(implementer가 따르고 verifier가 검사) |
 | `reports/` | manager | 끝 보고: 결과, 결정, 남은 위험, 사용자가 할 일 |
 - 파일 이름은 `YYYY-MM-DD-HHMM-<작업 ID 또는 주제>.md`(시각은 `date +%Y-%m-%d-%H%M`). 첫머리에 작성 시각, 작성자, 출처, 관련 작업·결정 ID.
-- 서브에이전트는 쓰기만 하고, manager가 바로 integration에 `docs(ai-harness): …`로 커밋한다(implementer는 `sched sync`로 받는다).
+- 서브에이전트는 쓰기만 하고, manager가 바로 integration에 `docs(asterbraid): …`로 커밋한다(implementer는 `sched sync`로 받는다).
 - 새 문서가 옛 문서를 대신하면 지우지 말고 옛 문서 첫머리에 `대체됨: <새 파일 이름>` 한 줄을 넣는다. 그 표시가 있는 문서는 읽지 말고 새 문서를 본다.
 - 작업에 관련된 문서는 모든 에이전트가 참고한다. 미리보기 HTML(`.git/claude-auto/previews/`, 해시로 승인)과 상태·결정·검증 증거(`sched`)는 지금 자리 그대로다.
 

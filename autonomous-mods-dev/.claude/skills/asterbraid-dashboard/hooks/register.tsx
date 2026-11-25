@@ -1,4 +1,4 @@
-// autonomous-dashboard: sched.py가 쓴 읽기 전용 스냅샷과 이 세션에서 관측한 에이전트 이벤트를 보여 준다.
+// asterbraid-dashboard: sched.py가 쓴 읽기 전용 스냅샷과 이 세션에서 관측한 에이전트 이벤트를 보여 준다.
 // 원칙: 관찰 Hook은 next(e)의 결과를 그대로 돌려준다. 작업 상태는 사용자가 직접 누르거나 입력한 행동만
 // sched.py 명령(argv, 셸 없음)으로 바꾼다. 렌더링 중에는 파일·프로세스를 건드리지 않는다.
 import { atom, read, update } from 'claude-code'
@@ -7,16 +7,16 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Activity, Run, SnapMeta, Snapshot, Tab, Usage, View } from '../types'
 import * as C from './core'
 
-const PANE = 'autonomous'
-const TITLE = 'Autonomous'
+const PANE = 'asterbraid'
+const TITLE = 'AsterBraid'
 
 // 저장한 값의 모양을 바꾸면 shape 태그를 올린다. 예전 모양은 초기값으로 읽힌다.
-const snapA = atom({ plugin: 'autonomous-dashboard', key: 'snap' } as const, null as Snapshot | null, { shape: 'snap-1' })
-const metaA = atom({ plugin: 'autonomous-dashboard', key: 'meta' } as const, C.EMPTY_META, { shape: 'meta-2' })
-const runsA = atom({ plugin: 'autonomous-dashboard', key: 'runs' } as const, [] as Run[], { shape: 'runs-3' })
-const activityA = atom({ plugin: 'autonomous-dashboard', key: 'activity' } as const, [] as Activity[], { shape: 'activity-1' })
-const viewA = atom({ plugin: 'autonomous-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-3' })
-const usageA = atom({ plugin: 'autonomous-dashboard', key: 'usage' } as const, { costUsd: null, contextPct: null } as Usage, { shape: 'usage-1' })
+const snapA = atom({ plugin: 'asterbraid-dashboard', key: 'snap' } as const, null as Snapshot | null, { shape: 'snap-1' })
+const metaA = atom({ plugin: 'asterbraid-dashboard', key: 'meta' } as const, C.EMPTY_META, { shape: 'meta-2' })
+const runsA = atom({ plugin: 'asterbraid-dashboard', key: 'runs' } as const, [] as Run[], { shape: 'runs-3' })
+const activityA = atom({ plugin: 'asterbraid-dashboard', key: 'activity' } as const, [] as Activity[], { shape: 'activity-1' })
+const viewA = atom({ plugin: 'asterbraid-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-3' })
+const usageA = atom({ plugin: 'asterbraid-dashboard', key: 'usage' } as const, { costUsd: null, contextPct: null } as Usage, { shape: 'usage-1' })
 
 const TONE_COLOR: Record<C.Tone, string | undefined> = {
   ok: 'success', warn: 'warning', err: 'error', accent: 'claude', info: 'suggestion', dim: undefined, plain: undefined,
@@ -113,7 +113,7 @@ async function poll($: EngineInterface, force = false) {
     ])
     const had = (await read($, snapA)) !== null
     if (!st) {
-      await update($, metaA, x => ({ ...x, readAtMs: now, error: '스냅샷이 없다. sched init 전이거나 /autonomous refresh가 필요하다', stale: had }))
+      await update($, metaA, x => ({ ...x, readAtMs: now, error: '스냅샷이 없다. sched init 전이거나 /asterbraid refresh가 필요하다', stale: had }))
       return
     }
     const errText = errSt && errSt.mtimeMs >= st.mtimeMs ? await $.fs.read(`${m.stateDir}/dashboard.error.json`).catch(() => '') : ''
@@ -162,7 +162,7 @@ async function checkAnomalies($: EngineInterface) {
     if (cfg.notify) $.ui.toast(`autonomous ⚠ ${w.text}`)
   }
   if (fresh.length && cfg.tellManager) {
-    const text = `[autonomous-dashboard 관측 경고] ${fresh.map(w => w.text).join(' / ')}. 원인을 확인하고 필요하면 sched recover·재배정·사용자 보고를 판단한다.`
+    const text = `[asterbraid-dashboard 관측 경고] ${fresh.map(w => w.text).join(' / ')}. 원인을 확인하고 필요하면 sched recover·재배정·사용자 보고를 판단한다.`
     await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(() => undefined)
   }
 }
@@ -294,7 +294,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'autonomous',
+      name: 'asterbraid',
       description: 'autonomous 관제 Pane과 미리보기: open|close|status|agents|queue|timeline|git|decisions|metrics|errors|preview|refresh|help',
       argumentHint: '[open|close|<탭>|preview [ID [vN]]|refresh|layout L|help]',
       immediate: true,
@@ -392,7 +392,7 @@ export const register: Register = (on, options) => {
 
   // ---------------------------------------------------------------- 명령
 
-  on('command.run', { command: 'autonomous' }, async ($, e) => {
+  on('command.run', { command: 'asterbraid' }, async ($, e) => {
     ensureTimer($)
     if (!(await read($, metaA)).stateDir) await discover($) // 리로드 뒤 처음 명령이면 저장소를 다시 찾는다
     const a = C.parseCommand(e.args)
@@ -451,9 +451,9 @@ export const register: Register = (on, options) => {
     if (!snap) {
       return (
         <Box flexDirection="column" width={W}>
-          <Text bold color="claude">AUTONOMOUS</Text>
+          <Text bold color="claude">ASTERBRAID</Text>
           <Text color={meta.error ? 'warning' : undefined} wrap="wrap">{meta.error ?? '스냅샷을 읽는 중'}</Text>
-          <Text dimColor wrap="wrap">manager가 `sched init` 뒤 작업을 등록하면 여기에 보인다. /autonomous refresh</Text>
+          <Text dimColor wrap="wrap">manager가 `sched init` 뒤 작업을 등록하면 여기에 보인다. /asterbraid refresh</Text>
         </Box>
       )
     }
@@ -710,8 +710,8 @@ export const register: Register = (on, options) => {
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column" width={Math.max(20, e.props.bodyColumns)}>
-        <Text bold>AUTONOMOUS</Text>
-        <Text color="error" wrap="wrap">{`그리기 실패(${next.error.kind}): ${next.error.message ?? ''}. /autonomous refresh 또는 manager에게 상태를 묻는다`}</Text>
+        <Text bold>ASTERBRAID</Text>
+        <Text color="error" wrap="wrap">{`그리기 실패(${next.error.kind}): ${next.error.message ?? ''}. /asterbraid refresh 또는 manager에게 상태를 묻는다`}</Text>
       </Box>
     )
   })

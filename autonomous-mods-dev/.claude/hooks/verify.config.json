@@ -1,5 +1,5 @@
 {
-    "_comment": "처음 실행 때 manager가 설계 문서를 보고 고친다. 키 설명은 .claude/skills/harness-bootstrap/SKILL.md를 본다.",
+    "_comment": "처음 실행 때 manager가 설계 문서를 보고 고친다. 키 설명은 .claude/skills/asterbraid-bootstrap/SKILL.md를 본다.",
     "test_command": ["{python}", "-m", "unittest"],
     "test_env": {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": ".no-pycache"},
     "python_candidates": [".venv/Scripts/python.exe", ".venv/bin/python"],

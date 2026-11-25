@@ -1,16 +1,18 @@
-# autonomous-mods-dev
+# AsterBraid (autonomous-mods-dev)
 
-`autonomous-parallel-dev`의 자율 개발 엔진을 그대로 쓰고, Claude Code Mod(`autonomous-dashboard`)로 관제 화면을 더한 템플릿.
+여러 에이전트가 각자 worktree에서 짠 작업을 검증해 하나로 엮는 Claude Code 하네스. 이름은 별(aster)들을 땋는다(braid)는 뜻이다.
+
+`autonomous-parallel-dev`의 자율 개발 엔진을 그대로 쓰고, Claude Code Mod(`asterbraid-dashboard`)로 관제 화면을 더한 템플릿.
 사용자는 **manager 한 명과 대화**하고, 나머지 에이전트의 활동과 전체 진행은 Claude Code 안의 Pane에서 본다.
 구현 전 결과물은 지금처럼 브라우저의 미리보기 HTML로 검토·승인한다. 판단은 에이전트가 하고, **상태·배정·병합·승인 기록은 프로그램이 강제한다.**
 
 ## 흐름
 ```mermaid
 flowchart TD
-    T["템플릿 + 설계 문서<br/>또는 기존 프로젝트에 이식"] -->|"처음 한 번"| BS["manager: 시작 준비 (harness-bootstrap)<br/>(git init) · CLAUDE.md · verify.config · .gitignore 채우기·합치기<br/>→ 확인 → integration · 기준선 테스트 · sched init"]
+    T["템플릿 + 설계 문서<br/>또는 기존 프로젝트에 이식"] -->|"처음 한 번"| BS["manager: 시작 준비 (asterbraid-bootstrap)<br/>(git init) · CLAUDE.md · verify.config · .gitignore 채우기·합치기<br/>→ 확인 → integration · 기준선 테스트 · sched init"]
     BS --> M
     U["사용자"] <-->|"대화 · 결정"| M["manager<br/>판단 · 설명 · 조정"]
-    U -.->|"관제 · 승인 · 결정 버튼"| P["autonomous-dashboard<br/>Pane · /autonomous"]
+    U -.->|"관제 · 승인 · 결정 버튼"| P["asterbraid-dashboard<br/>Pane · /asterbraid"]
     U -.->|"검토"| H["미리보기 HTML<br/>previews/index.html"]
     M -->|"sched 명령"| S[("sched.py<br/>상태 · 의존성 · 결정 · 슬롯")]
     P -->|"사용자가 누른 것만<br/>sched 명령(argv)"| S
@@ -25,8 +27,8 @@ flowchart TD
     G -->|"MERGED"| B["통합 브랜치"]
     B -.->|"사용자가 결정"| MAIN["main"]
 ```
-- Pane은 스냅샷을 **읽기만** 한다. 상태를 바꾸는 것은 사용자가 Pane이나 `/autonomous`에서 직접 누르거나 입력한 승인·수정 요청·결정·슬롯·일시 중지뿐이고, 그것도 `sched.py`의 같은 검사를 거친다.
-  그 밖에 Mod가 스스로 실행하는 `sched.py` 명령은 상태를 바꾸지 않는 `snapshot`(시작할 때 스냅샷만 없으면 한 번)과 `dashboard`(`/autonomous preview`)뿐이다.
+- Pane은 스냅샷을 **읽기만** 한다. 상태를 바꾸는 것은 사용자가 Pane이나 `/asterbraid`에서 직접 누르거나 입력한 승인·수정 요청·결정·슬롯·일시 중지뿐이고, 그것도 `sched.py`의 같은 검사를 거친다.
+  그 밖에 Mod가 스스로 실행하는 `sched.py` 명령은 상태를 바꾸지 않는 `snapshot`(시작할 때 스냅샷만 없으면 한 번)과 `dashboard`(`/asterbraid preview`)뿐이다.
 - 미리보기 승인이나 결정을 기다리는 작업만 멈춘다. 독립된 작업은 조사·구현·검증·통합을 계속한다.
 
 ## 상태
@@ -64,10 +66,10 @@ CLAUDE.md                                   규칙 (TODO 채우기)
 .claude/hooks/verify.py                     테스트 검증 (모든 템플릿과 같은 파일)
 .claude/hooks/auto.config.json, verify.config.json
 .claude/agents/                             manager, researcher, architect, designer, implementer, verifier
-.claude/skills/autonomous-dashboard/        관제 Mod (Claude Code 플러그인, 자동 로드)
+.claude/skills/asterbraid-dashboard/        관제 Mod (Claude Code 플러그인, 자동 로드)
 .claude/skills/preview-workflow/            미리보기 제작·등록·검토 절차 스킬
 .claude/skills/architecture-design/         설계 깊이별 design.md 형식·규칙 (deep 점검표는 references/)
-.claude/skills/harness-bootstrap/           시작 준비 절차와 verify.config.json 키 설명 (manager가 처음 한 번 부른다)
+.claude/skills/asterbraid-bootstrap/           시작 준비 절차와 verify.config.json 키 설명 (manager가 처음 한 번 부른다)
 .claude/previewUI/preview.html              미리보기 대시보드 화면 소스
 ```
 AI 도구의 소스·설정은 모두 `.claude/`에, 실행 중에 생기는 상태·결과물은 `.git/claude-auto/`에 둔다(저장소 밖이라 커밋되지 않는다).
@@ -79,7 +81,7 @@ Mod를 `.claude/mods/`가 아니라 `.claude/skills/`에 두는 것은 Claude Co
 ## 사용법
 1. `CLAUDE.md`와 `.claude/`를 프로젝트 폴더에 복사하고, 설계·요구사항 문서를 넣는다(예: `docs/design.md`). git 저장소가 아니어도 된다(manager가 `git init`한다).
 2. **저장소 루트에서** `claude --agent manager`로 연다. 처음이면 작업 폴더 신뢰를 승인한다. Mod는 `--plugin-dir` 없이 로드된다
-   (`/plugin` Installed 탭에 `autonomous-dashboard@skills-dir`. 넓은 터미널이면 Pane이 자동으로 열린다).
+   (`/plugin` Installed 탭에 `asterbraid-dashboard@skills-dir`. 넓은 터미널이면 Pane이 자동으로 열린다).
 3. 설계 문서를 주고 진행을 맡긴다. 처음 한 번 manager가 **시작 준비**를 한다:
    문서를 보고 `CLAUDE.md`의 TODO·`verify.config.json`(테스트 명령 등)·`.gitignore`를 채울 내용을 요약해 확인받고,
    적용하고 `integration` 브랜치로 바꾼 뒤 커밋하고(`main`에는 커밋하지 않는다) `sched init`한다. 설계 결정은 그다음 `sched decide`로 연다. `verify.config.json` 수정은 승인 창이 한 번 뜬다.
@@ -94,12 +96,12 @@ Mod를 `.claude/mods/`가 아니라 `.claude/skills/`에 두는 것은 Claude Co
 3. 요구(추가할 기능)를 문서로 주거나 대화로 준다. 시작 준비가 코드에서 언어·테스트 도구를 읽고, `sched init` 전에 현재 코드로 전체 테스트를 한 번 돌린다.
    기존 테스트가 실패하면 통합이 모두 막히므로, 먼저 고칠지 결정을 받는다.
 
-Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"autonomous-dashboard@skills-dir": false}}`. 개발 기능은 그대로 돈다.
-한 세션만 다른 폴더의 Mod로 열려면 `claude --agent manager --plugin-dir ./.claude/skills/autonomous-dashboard`.
+Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-dashboard@skills-dir": false}}`. 개발 기능은 그대로 돈다.
+한 세션만 다른 폴더의 Mod로 열려면 `claude --agent manager --plugin-dir ./.claude/skills/asterbraid-dashboard`.
 
-## 관제 화면 (autonomous-dashboard)
+## 관제 화면 (asterbraid-dashboard)
 ```
- AUTONOMOUS shop · integration 3f2a1c9                        ⠹ 실시간 · 변화 2m00s 전
+ ASTERBRAID shop · integration 3f2a1c9                        ⠹ 실시간 · 변화 2m00s 전
  진행 ████░░░░░░░░░░ 4/12 완료 33% (작업 수 기준)
  실행 3 · 배정 4 · 검증 1 · 통합 대기 0 · 실행 미확인 1
  ▶ 사용자 차례: 미리보기 승인 1 · 결정 1  → 4 승인·결정 탭
@@ -128,13 +130,13 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"autonomous-da
 | 승인·결정 | 검토 대기 미리보기(열기·승인·수정 요청 입력), 열린 결정(선택지·장단점·추천·선택 버튼). 기다리는 수가 탭 이름 옆에 붙는다 |
 | 통합·지표 | 통합 브랜치 HEAD, 작업 브랜치와 검증 수, 통합 대기열, 최근 통합 결과, 스케줄러 지표와 Mod 관측(동시 실행, 토큰, 세션 비용 추정) |
 | 활동 | 상태 변화, 통합 결과, 결정, 에이전트 시작·끝, 도구 거부, 경고. 오류·경고만 보기 |
-| 명령 | 명령을 치지 않고 버튼으로: 새로고침, 브라우저 대시보드, 배치 바꾸기, Pane 닫기, 새 배정 일시 중지·재개, 풀별 동시 실행 한도 −/+, 작업 우선순위 ▲/▼. 아래에 같은 일을 하는 `/autonomous` 명령을 보인다 |
+| 명령 | 명령을 치지 않고 버튼으로: 새로고침, 브라우저 대시보드, 배치 바꾸기, Pane 닫기, 새 배정 일시 중지·재개, 풀별 동시 실행 한도 −/+, 작업 우선순위 ▲/▼. 아래에 같은 일을 하는 `/asterbraid` 명령을 보인다 |
 
-## 명령 (`/autonomous`)
+## 명령 (`/asterbraid`)
 모델을 부르지 않고 바로 실행된다(manager가 응답하는 중에도).
 | 명령 | 동작 |
 |---|---|
-| `/autonomous`, `open` / `close` | Pane 열기 / 닫기(개발은 계속) |
+| `/asterbraid`, `open` / `close` | Pane 열기 / 닫기(개발은 계속) |
 | `status` `tasks` `agents` `decisions` `git` `activity` `commands` | 해당 탭(`queue`·`timeline`은 작업 탭, `metrics`는 통합·지표, `errors`는 활동) |
 | `preview` / `preview ID` / `preview ID v2` | 대시보드를 새로 만들어 기본 브라우저로 / 작업의 최신 / 특정 버전 열기 |
 | `refresh` | 스냅샷을 다시 만들고 읽는다 |
@@ -153,15 +155,15 @@ manager가 중요한 선택을 만나면 결정을 열고(`sched decide add`, �
 
 ## 미리보기 승인
 - designer가 `preview-workflow` 절차로 한 파일 HTML을 만들고 `sched preview`로 등록한다. 버전마다 `previews/<ID>/vN.html`과 SHA-256이 남는다.
-- 승인은 본 버전과 해시로 한다: `sched approve ID --version 2 --sha <앞 12자>`. Pane·`/autonomous`는 자동으로 붙인다.
+- 승인은 본 버전과 해시로 한다: `sched approve ID --version 2 --sha <앞 12자>`. Pane·`/asterbraid`는 자동으로 붙인다.
   최신 버전만 승인할 수 있다(옛 안이 필요하면 designer가 새 버전으로 다시 등록한다). 해시가 다르거나 파일이 등록 뒤 바뀌었으면 거부한다.
   수정 요청도 최신 버전에만 한다(오래된 화면 방지). `--version`을 빼면 최신 버전으로 보고, 파일 해시 검사는 언제나 한다.
 - 미리보기 파일은 `.html`/`.htm`만 등록·열기한다(OS 기본 프로그램으로 다른 형식을 실행하지 않게).
 - 승인한 버전의 해시가 검증 기준에 들어간다. 승인이 바뀌면 이전 검증 증거는 무효다. 승인 기록에는 시각·누가·당시 완료 기준 해시도 남는다(기록용).
 - 대시보드는 읽기 전용이다. 승인 버튼이 없고 로컬 서버도 없다. 미리보기는 `sandbox="allow-scripts"` iframe으로만 띄워, 미리보기 안의 코드가 대시보드나 승인에 닿지 못한다.
 
-## AI 문서 (`docs/ai-harness/`)
-에이전트가 개발하며 남기는 문서는 저장소의 `docs/ai-harness/`에 두고 커밋한다. 세션이 바뀌어도 남고, implementer는 `sched sync`로 자기 worktree에서 읽는다.
+## AI 문서 (`docs/asterbraid/`)
+에이전트가 개발하며 남기는 문서는 저장소의 `docs/asterbraid/`에 두고 커밋한다. 세션이 바뀌어도 남고, implementer는 `sched sync`로 자기 worktree에서 읽는다.
 | 폴더 | 쓰는 쪽 | 내용 |
 |---|---|---|
 | `requirements/` | manager | 요구 분석: 출처, 적힌 것 → 작업, 추론과 근거, 미정 → 결정. 문서로 받은 요구는 원본을 가리키고(원본이 기준), 대화로 정한 요구는 이 문서가 원본이라 보여 주고 확인받는다 |
@@ -169,7 +171,7 @@ manager가 중요한 선택을 만나면 결정을 열고(`sched decide add`, �
 | `design/` | architect | 설계·계약. implementer가 따르고 verifier가 검사한다 |
 | `reports/` | manager | 끝 보고(결과, 결정, 남은 위험, 사용자가 할 일) |
 
-파일 이름은 `YYYY-MM-DD-HHMM-<작업 ID 또는 주제>.md`, 첫머리에 작성 시각·작성자·출처·관련 작업과 결정. 서브에이전트는 쓰기만 하고 manager가 바로 `docs(ai-harness): …`로 커밋한다.
+파일 이름은 `YYYY-MM-DD-HHMM-<작업 ID 또는 주제>.md`, 첫머리에 작성 시각·작성자·출처·관련 작업과 결정. 서브에이전트는 쓰기만 하고 manager가 바로 `docs(asterbraid): …`로 커밋한다.
 옛 문서는 지우지 않는다. 새 문서가 대신하면 옛 문서 첫머리에 `대체됨: <새 파일>`을 적어, 에이전트가 옛 계약을 최신으로 읽지 않게 한다.
 문서만 바뀌면 테스트를 돌리지 않는다(`verify.config.json`의 `ignored_prefixes`의 `docs/`). 미리보기 HTML과 상태·결정·검증 기록은 지금처럼 `.git/claude-auto/`와 `sched`에 둔다(해시로 승인하고 프로그램이 검사한다).
 요구를 대화로 줄 때는 "지금 얘기한 걸 requirements로 정리해서 보여 주고, 확인받은 다음에 진행해줘"라고 하면 된다.
@@ -241,8 +243,8 @@ Mod 설정은 Claude Code 설정 메뉴(또는 settings의 `pluginConfigs`)에�
 
 ## 테스트
 - 스케줄러: `python -m unittest discover -s tests -p "test_autonomous_mods.py"` (기존 autonomous 테스트를 이 템플릿에 다시 돌리는 회귀 + 확장 기능)
-- Mod: `claude plugin validate .claude/skills/autonomous-dashboard`, `claude plugin test .claude/skills/autonomous-dashboard`
-- 타입: Mod 폴더를 한 번 로드하면 엔진이 `.claude-plugin/types/`를 쓰고, 그 뒤 `npx -p typescript tsc -p .claude/skills/autonomous-dashboard`
+- Mod: `claude plugin validate .claude/skills/asterbraid-dashboard`, `claude plugin test .claude/skills/asterbraid-dashboard`
+- 타입: Mod 폴더를 한 번 로드하면 엔진이 `.claude-plugin/types/`를 쓰고, 그 뒤 `npx -p typescript tsc -p .claude/skills/asterbraid-dashboard`
 
 ## 한계
 - **실제 Claude Code 세션에서 끝까지 돌려 본 적이 없다.** 스케줄러는 실제 git 저장소 테스트, Mod는 엔진 테스트 도구(`claude plugin test`)와 타입 검사로만 확인했다.

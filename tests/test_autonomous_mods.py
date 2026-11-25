@@ -398,7 +398,7 @@ class TestSnapshotFailure(ModsCase):
 
 class TestModManifest(unittest.TestCase):
     """Mod 파일끼리의 약속. Mod 자체 동작은 `claude plugin test`가 검사한다."""
-    MOD = Path(base.__file__).resolve().parent.parent / MODS / ".claude/skills/autonomous-dashboard"
+    MOD = Path(base.__file__).resolve().parent.parent / MODS / ".claude/skills/asterbraid-dashboard"
 
     def test_settings_enable_the_mod_by_its_manifest_name(self):
         name = json.loads((self.MOD / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))["name"]
@@ -438,15 +438,15 @@ class TestAgentSkills(unittest.TestCase):
         self.assertEqual(seen["designer"], ["preview-workflow"])
 
     def test_ai_docs_folder_is_committed_and_skips_tests(self):
-        """AI 문서는 docs/ai-harness/에 커밋하고(worktree에서 보이게), 문서만 바뀌면 테스트를 돌리지 않는다."""
+        """AI 문서는 docs/asterbraid/에 커밋하고(worktree에서 보이게), 문서만 바뀌면 테스트를 돌리지 않는다."""
         root = self.CLAUDE.parent
         rules = (root / "CLAUDE.md").read_text(encoding="utf-8")
         for folder in ("requirements/", "research/", "design/", "reports/"):
             self.assertIn(f"`{folder}`", rules)
         for agent, folder in (("manager", "requirements/"), ("researcher", "research/"), ("architect", "design/")):
-            self.assertIn(f"docs/ai-harness/{folder}", (self.CLAUDE / "agents" / f"{agent}.md").read_text(encoding="utf-8"), agent)
+            self.assertIn(f"docs/asterbraid/{folder}", (self.CLAUDE / "agents" / f"{agent}.md").read_text(encoding="utf-8"), agent)
         cfg = json.loads((self.CLAUDE / "hooks/verify.config.json").read_text(encoding="utf-8"))
-        self.assertTrue(any("docs/ai-harness/x.md".startswith(p) for p in cfg["ignored_prefixes"]))
+        self.assertTrue(any("docs/asterbraid/x.md".startswith(p) for p in cfg["ignored_prefixes"]))
         gitignore = root / ".gitignore"
         self.assertFalse(gitignore.exists() and "docs" in gitignore.read_text(encoding="utf-8"))
 
@@ -462,11 +462,11 @@ class TestBootstrap(unittest.TestCase):
     TEMPLATE = Path(base.__file__).resolve().parent.parent / MODS
 
     def bootstrap_text(self):
-        """시작 준비 절차는 harness-bootstrap 스킬에 있고, manager.md는 그 스킬을 가리킨다."""
+        """시작 준비 절차는 asterbraid-bootstrap 스킬에 있고, manager.md는 그 스킬을 가리킨다."""
         manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
-        self.assertIn("harness-bootstrap", manager)
+        self.assertIn("asterbraid-bootstrap", manager)
         self.assertIn("Skill", manager.split("---", 2)[1])
-        return (self.TEMPLATE / ".claude/skills/harness-bootstrap/SKILL.md").read_text(encoding="utf-8")
+        return (self.TEMPLATE / ".claude/skills/asterbraid-bootstrap/SKILL.md").read_text(encoding="utf-8")
 
     def test_fresh_repo_with_only_template_reaches_init(self):
         import shutil

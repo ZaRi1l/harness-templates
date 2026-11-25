@@ -26,7 +26,7 @@ jobs:
       CLAUDE_CODE_VERSION: 2.1.331
       DISABLE_AUTOUPDATER: 1
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
-      MOD: autonomous-mods-dev/.claude/skills/autonomous-dashboard
+      MOD: autonomous-mods-dev/.claude/skills/asterbraid-dashboard
     steps:
       - uses: actions/checkout@v7
         with:

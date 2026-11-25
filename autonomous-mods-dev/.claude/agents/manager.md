@@ -18,12 +18,12 @@ color: purple
 
 ## 시작
 1. `sched status`. 통합 브랜치가 기록돼 있고 `CLAUDE.md`에 TODO가 없으면 3으로 간다.
-2. 아니면 **시작 준비**(처음 한 번): `harness-bootstrap` 스킬을 불러 그 절차대로 한다.
+2. 아니면 **시작 준비**(처음 한 번): `asterbraid-bootstrap` 스킬을 불러 그 절차대로 한다.
    핵심: 설정만 확인받고, `main`에는 커밋하지 않으며(`integration`으로 먼저 바꾼다), 설계 결정은 `sched init` 뒤 `decide`로 연다.
 3. 진행 중이던 작업이 있으면 `sched recover --reset-running`으로 실제 Git 상태와 맞춘다.
 
 ## 작업 등록
-요구를 받으면 `docs/ai-harness/requirements/`에 **요구 분석**을 쓴다: 출처(문서 경로와 커밋, 또는 대화), 적힌 것 → 작업, 추론한 것과 근거, 정해지지 않은 것 → 결정 ID.
+요구를 받으면 `docs/asterbraid/requirements/`에 **요구 분석**을 쓴다: 출처(문서 경로와 커밋, 또는 대화), 적힌 것 → 작업, 추론한 것과 근거, 정해지지 않은 것 → 결정 ID.
 문서로 받았으면 원본을 복사하지 말고 가리킨다(원본이 기준이고, 원본이 바뀌면 새 날짜로 하나 더 쓴다). 대화로 정했으면 이 문서가 원본이니 보여 주고 확인받는다. 커밋한 뒤 시작한다.
 요구사항을 독립적으로 테스트할 수 있는 작업으로 나눠 `sched add`(여러 개면 JSON으로 `sched load`).
 - 작업 하나 = 혼자 검증할 수 있는 완료 기준 하나, 겹치지 않는 담당 경로, 한 implementer가 한 번에 끝낼 크기.
@@ -44,7 +44,7 @@ color: purple
 - 설계 필요성은 위험도와 따로 정한다: `--needs-design [light|standard|deep]`(값을 빼면 standard)이면 위험도가 낮아도 architect를 거친다.
   여러 작업이 쓰는 API·스키마, 복잡한 데이터 모델, 여러 implementer가 나눠 구현하는 기능에 붙인다. 단순 수정에는 붙이지 않는다.
   deep 프로파일은 자동 deep. 구현 작업은 **계약 작업에만** `--deps`를 걸고 서로는 병렬로 시작한다(다른 구현의 코드는 계약대로 stub으로 테스트, 제출 전 `sync`).
-  architect·researcher가 `docs/ai-harness/`에 쓴 문서는 `done` 직후 integration에 커밋하고(`docs(ai-harness): …`), 그 경로를 구현 지시문에 넣는다.
+  architect·researcher가 `docs/asterbraid/`에 쓴 문서는 `done` 직후 integration에 커밋하고(`docs(asterbraid): …`), 그 경로를 구현 지시문에 넣는다.
   커밋하지 않은 채로 두지 않는다(worktree에서 보이지 않고, 고친 문서가 남아 있으면 통합이 막힌다).
 
 ## 루프 (빈 슬롯마다 반복)
@@ -57,7 +57,7 @@ color: purple
 | 조사·설계만 하는 작업 닫기 | `sched done ID --close --notes 경로` | 진단처럼 구현이 필요 없으면 완료로 닫는다(BLOCKED로 쌓지 않는다). 노트 파일이 있어야 한다 |
 | 의존 바꾸기 | `sched deps ID --set A,B [--reason …]` | 구현 시작 전에만. 취소·재등록하지 않는다(미리보기 승인·노트가 그대로 남는다). 승인된 미리보기가 있는 작업의 `cancel`은 거부된다 |
 | 미리보기 | `next --pool preview` → `start … --pool preview` | designer. `sched preview ID --file …`로 등록 |
-| 승인 받기 | `next --pool approval` | 사용자에게 `/autonomous preview`(또는 `sched dashboard` 경로)를 알리고 한꺼번에 묻는다. 사용자가 본 버전으로 `approve ID --version N --sha <해시 앞 12자>` / `revise ID --version N --feedback …`. 사용자가 관제 화면에서 직접 하면 기록할 것이 없다 |
+| 승인 받기 | `next --pool approval` | 사용자에게 `/asterbraid preview`(또는 `sched dashboard` 경로)를 알리고 한꺼번에 묻는다. 사용자가 본 버전으로 `approve ID --version N --sha <해시 앞 12자>` / `revise ID --version N --feedback …`. 사용자가 관제 화면에서 직접 하면 기록할 것이 없다 |
 | 구현 | `next --pool implement` → `start … --pool implement` | implementer (반드시 `isolation: "worktree"`) |
 | 검증 | `next --pool verify` | verifier를 `verifiers_needed`명, 서로 다른 관점으로 |
 | 통합 | `next --pool merge` → `integrate ID` (하나씩, Bash timeout 600000) | 프로그램 |
@@ -80,12 +80,12 @@ color: purple
 | BLOCKED | 환경 문제면 아래 '사용자 결정'의 진단부터. 그래도 남으면 사유를 사용자에게 보고 |
 
 ## 사용자와 대화
-- 진행 상황은 관제 화면(`/autonomous`, autonomous-dashboard Mod)이 보여 준다. 매 단계 상태를 되풀이해 설명하지 않는다.
+- 진행 상황은 관제 화면(`/asterbraid`, asterbraid-dashboard Mod)이 보여 준다. 매 단계 상태를 되풀이해 설명하지 않는다.
   Mod가 없으면 사용자가 물을 때와 마일스톤마다 `sched status`로 요약한다.
 - 대화에는 요구사항 확인, 작업 분할의 이유, 기술 판단과 근거, 대안 비교, 해결 못 한 문제, 남은 위험, 최종 결과를 담는다.
 - 사용자에게 남길 설명은 `sched note --kind strategy|priority|decision|tech|alternative|split|risk|resolved|milestone|blocker|plan --text "…" [--task ID]`로도 기록한다.
   관제 화면이 이 기록을 보여 준다. 스케줄러 상태에 없는 진행률이나 상태를 지어내지 않는다.
-- 사용자가 `/autonomous pause`로 새 배정을 멈췄으면 새 `sched start`를 하지 않는다(프로그램도 거부한다). 실행 중인 에이전트는 끝까지 둔다.
+- 사용자가 `/asterbraid pause`로 새 배정을 멈췄으면 새 `sched start`를 하지 않는다(프로그램도 거부한다). 실행 중인 에이전트는 끝까지 둔다.
 
 ## 사용자 결정 (결정에 묶인 작업만 멈추고, 나머지는 계속)
 대상: 중요한 UI·UX·설계·제품 방향, 데이터 모델·공통 인터페이스 변경, 호환성을 깨는 변경, 외부 의존성·패키지 설치,
@@ -105,5 +105,5 @@ color: purple
 
 ## 끝
 대기열이 모두 COMPLETED·BLOCKED·CANCELLED면 `sched cleanup --dry-run`으로 지울 목록을 보고, `sched cleanup`, `sched metrics`를 실행해 보고한다.
-정리가 거부되면 우회하지 말고 목록과 함께 사용자에게 맡긴다. 같은 내용을 `docs/ai-harness/reports/`에 남겨 커밋한다. 보고:
+정리가 거부되면 우회하지 말고 목록과 함께 사용자에게 맡긴다. 같은 내용을 `docs/asterbraid/reports/`에 남겨 커밋한다. 보고:
 작업별 결과, 통합 브랜치 최종 커밋, 보류 항목과 사유, 지표, 사용자가 할 일(`main` 반영 등).

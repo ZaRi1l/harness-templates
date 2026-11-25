@@ -1,4 +1,4 @@
-# 설계 기록
+# 설계 기록 — AsterBraid (autonomous-mods-dev)
 
 `autonomous-parallel-dev`의 결정(JSON 상태 + 잠금, `.git/claude-auto/`, 상태 변경은 `sched.py`로만, 통합은 프로그램,
 임시 worktree 통합, 커밋에 묶인 증거)은 그대로 둔다. 아래는 이 템플릿에서 더한 것이다.
@@ -14,8 +14,9 @@
 ## 결정
 | 주제 | 결정 | 이유 |
 |---|---|---|
+| 이름 (2026-11-25) | 사람에게 보이는 이름은 **AsterBraid**로 통일: Mod `asterbraid-dashboard`, 명령 `/asterbraid`, 스킬 `asterbraid-bootstrap`, 문서 `docs/asterbraid/`. 템플릿 폴더와 엔진 내부 이름(`.git/claude-auto/`, `auto.config.json`, `[auto-task]`, 스냅샷 `schema`)은 그대로 | harness·autonomous·auto가 섞여 있었다. Loom·Heddle은 같은 분야 오픈소스가 많아 명령이 겹칠 수 있어 피했다(2026-11-25 검색). 내부 이름은 autonomous-parallel-dev와 같은 엔진이고 진행 중인 프로젝트가 깨져 바꾸지 않는다 |
 | 템플릿 분리 | `autonomous-parallel-dev`를 복사해 이 템플릿에만 기능을 더한다 | 기존 엔진을 바꾸지 않고, Mods API(early access) 의존을 이 템플릿에 가둔다 |
-| Mod 위치 | `.claude/skills/autonomous-dashboard/` + `enabledPlugins` | 프로젝트에서 자동 로드되는 유일한 위치. `--plugin-dir`·사용자 설정 변경이 필요 없다 |
+| Mod 위치 | `.claude/skills/asterbraid-dashboard/` + `enabledPlugins` | 프로젝트에서 자동 로드되는 유일한 위치. `--plugin-dir`·사용자 설정 변경이 필요 없다 |
 | 상태 원천 | `sched.py`의 `state.json` 하나. Mod는 별도 DB·스케줄러를 두지 않는다 | 규칙을 두 곳에서 구현하면 어긋난다 |
 | Mod가 읽는 것 | 상태를 쓸 때 같은 잠금 안에서 쓰는 `dashboard.json`(schema_version 1) | Mod가 잠금을 잡지 않고, 매 틱 subprocess를 띄우지 않는다. 파일 시각이 바뀔 때만 읽는다 |
 | 스냅샷 실패 | 상태 기록은 그대로 성공, `dashboard.error.json`을 남긴다. Mod는 stale로 표시 | 화면 문제로 개발이 멈추면 안 된다 |
@@ -28,7 +29,7 @@
 | 대시보드 승인 버튼 | 두지 않는다. 로컬 서버도 없다 | 정적 HTML 버튼은 상태를 바꿀 수 없고, 서버는 공격면이다. 승인은 Pane·CLI·manager |
 | 미리보기 격리 | `sandbox="allow-scripts"` iframe | 미리보기 코드가 부모 페이지·승인 흐름에 닿지 않는다 |
 | designer 스킬 | `preview-workflow`만 미리 불러오고, 디자인 스킬은 있으면 `Skill`로 | 외부 스킬이 없는 환경에서도 동작. 이름이 설치 방법마다 달라 미리 불러오기가 깨진다 |
-| 시작 준비 | (절차는 `harness-bootstrap` 스킬, 처음 한 번만 불러 manager 프롬프트를 가볍게 둔다) 템플릿 + 설계 문서만 넣으면 manager가 `CLAUDE.md` TODO·`verify.config.json`·`.gitignore`를 채워 확인받고, 커밋·`integration` 생성·`sched init` | 사람이 기억해야 하는 수동 단계를 없앤다. 테스트 명령·검토 기준은 설계 문서에서 나오므로 문서를 읽는 manager가 채우는 것이 정확하다. 테스트 설정 수정은 승인 창으로 사람이 한 번 본다 |
+| 시작 준비 | (절차는 `asterbraid-bootstrap` 스킬, 처음 한 번만 불러 manager 프롬프트를 가볍게 둔다) 템플릿 + 설계 문서만 넣으면 manager가 `CLAUDE.md` TODO·`verify.config.json`·`.gitignore`를 채워 확인받고, 커밋·`integration` 생성·`sched init` | 사람이 기억해야 하는 수동 단계를 없앤다. 테스트 명령·검토 기준은 설계 문서에서 나오므로 문서를 읽는 manager가 채우는 것이 정확하다. 테스트 설정 수정은 승인 창으로 사람이 한 번 본다 |
 | 직접 git 권한 | `git merge`·`git worktree remove` 허용, rebase·`reset --hard`·`branch -D`·`remote`는 승인 필요 | 실제 사용에서 승인 요청이 자동 루프를 멈췄다(사용자 경험). 프로그램 경유 병합은 원래 규칙과 무관하고, 직접 병합 금지는 지침으로 남는다 |
 | 일시 중지 | 새 `start`만 거부. 실행 중 에이전트·검증·통합은 계속 | 에이전트를 강제로 멈추는 API가 스케줄러에 없고, 반쯤 한 작업을 버리지 않는다 |
 | 이상 감지 | 긴 단계는 `sched.py`(과거 중앙값 3배·10분·표본 3), 멈춤·연속 실패·유령 슬롯은 Mod. 경고만 한다 | 상주 LLM 감독관보다 싸고 재현된다. 원인 판단은 manager 하나만 한다 |
@@ -39,7 +40,7 @@
 | 설계 형식 | `architecture-design` 스킬(architect만 미리 불러옴). deep 점검표는 `references/`로 분리 | 깊이마다 필수 항목을 정해 implementer가 추측하지 않게. 긴 점검표는 deep일 때만 읽어 컨텍스트를 아낀다 |
 | 에이전트 모델 (2026-11-25) | manager·implementer opus, architect fable, 나머지 sonnet | implementer는 `inherit`이면 세션을 어떻게 열었는지에 따라 모델이 바뀌어 opus로 고정했다(지금까지의 e2e와 같은 품질). architect는 실행 횟수가 적고 어려운 추론이 몰려, 가격 2배인 fable의 효과가 가장 크다. manager는 짧은 판단을 오래 반복해 fable의 긴 응답·비용이 불리하다 |
 | 외부 방법론 스킬 | implementer에게 superpowers TDD·디버깅·완료 검증을 "있으면 사용"으로만 안내. 필수로 미리 불러오지 않는다 | 설치 여부·이름이 환경마다 다르다. 그 스킬들의 자체 worktree·서브에이전트·병합 절차는 스케줄러와 겹치므로 쓰지 않는다 |
-| AI 문서 위치 (2026-11-25) | `docs/ai-harness/{requirements,research,design,reports}/`에 날짜·시각 이름으로 쓰고 manager가 바로 커밋 | e2e3에서 계약 문서가 `.git` 안 노트나 메인 체크아웃에만 있어 worktree에서 안 보이고 통합에도 없었다. 대화로 정한 요구도 남지 않았다. 미리보기·상태·증거는 해시·프로그램 검사가 걸려 있어 그대로 둔다 |
+| AI 문서 위치 (2026-11-25) | `docs/asterbraid/{requirements,research,design,reports}/`에 날짜·시각 이름으로 쓰고 manager가 바로 커밋 | e2e3에서 계약 문서가 `.git` 안 노트나 메인 체크아웃에만 있어 worktree에서 안 보이고 통합에도 없었다. 대화로 정한 요구도 남지 않았다. 미리보기·상태·증거는 해시·프로그램 검사가 걸려 있어 그대로 둔다 |
 | 의존 변경 | `sched deps`(구현 전, 순환 검사), 승인된 미리보기 작업의 `cancel`은 `--force` | e2e3에서 의존을 바꾸려고 취소·재등록하다 미리보기 승인 연결이 끊겼다 |
 | 조사만 하는 작업 | `sched done --close`(노트 필수, 브랜치 있으면 거부) | 1차 e2e에서 진단 작업을 닫을 길이 없어 BLOCKED로 쌓였다 |
 | 정리 미리보기 | `sched cleanup --dry-run` | 자동 모드 분류기가 대상이 안 보이는 정리를 거부했다(2차 e2e). 목록을 먼저 보이면 사람과 분류기가 판단할 수 있다 |

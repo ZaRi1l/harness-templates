@@ -4,7 +4,7 @@
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0"
     },
     "enabledPlugins": {
-        "autonomous-dashboard@skills-dir": true
+        "asterbraid-dashboard@skills-dir": true
     },
     "worktree": {
         "baseRef": "head"
