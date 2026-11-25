@@ -602,13 +602,20 @@ export const register: Register = (on, options) => {
             .then(() => openPreview($, null, null))
             .then(text => setView($, v => ({ ...v, lastAction: `ℹ ${C.fit(text, 100)}` })))} />
           {C.pendingAway(snap).length > 0 && <Text bold color="suggestion">{`☾ 자리 비운 동안 자동으로 정한 것 ${C.pendingAway(snap).length}건`}</Text>}
-          {C.pendingAway(snap).map(x => (
-            <Box key={`aw-${x.key}`} columnGap={1} flexWrap="wrap">
-              {line([{ text: `${x.kind === 'decision' ? '결정' : '미리보기'} ${x.key} `, bold: true }, { text: x.text, tone: 'dim' }])}
-              {can && <Button key={`keep-${x.key}`} label="이대로 둠" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: false })} />}
-              {can && x.kind === 'decision' && <Button key={`redo-${x.key}`} label="다시 정하기" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: true })} />}
-            </Box>
-          ))}
+          {C.pendingAway(snap).map(x => {
+            const open = view.expanded === `away:${x.key}`
+            return (
+              <Box key={`aw-${x.key}`} flexDirection="column" marginBottom={1}>
+                {lines(C.awayLines(snap, x, W, open))}
+                <Box columnGap={1} flexWrap="wrap">
+                  {can && <Button key={`keep-${x.key}`} label="이대로 둠" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: false })} />}
+                  {can && x.kind === 'decision' && <Button key={`redo-${x.key}`} label="다시 정하기" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: true })} />}
+                  {x.kind === 'decision' && <Button key={`more-${x.key}`} label={open ? '접기' : '자세히'} onPress={() => setView($, v => ({ ...v, expanded: open ? null : `away:${x.key}` }))} />}
+                  {x.kind === 'preview' && x.version && <Button key={`open-aw-${x.key}`} label={`열기 v${x.version}`} onPress={() => openPreview($, x.key, x.version ?? null).then(say)} />}
+                </Box>
+              </Box>
+            )
+          })}
           <Text bold color="claude">미리보기 검토 {waiting.length}건</Text>
           {waiting.length === 0 && <Text dimColor>검토를 기다리는 미리보기가 없다</Text>}
           {waiting.map(t => {

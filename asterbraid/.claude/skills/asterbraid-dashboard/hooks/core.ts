@@ -501,6 +501,33 @@ export const awaiting = (snap: Snapshot | null) => (snap?.tasks ?? []).filter(t 
 /** 자리 비운 동안 추천안으로 정했고 사용자가 아직 확인하지 않은 것. */
 export const pendingAway = (snap: Snapshot | null): AwayEntry[] => (snap?.away_log ?? []).filter(x => x.reviewed === null)
 
+/**
+ * 자리 비운 동안 정한 것 하나. 고른 안은 자르지 않고 줄바꿈해 보이고, 펼치면 질문·다른 안·추천 이유·묶인 작업을 보인다
+ * (다시 정할지 판단하려면 다른 안도 봐야 한다).
+ */
+export const awayLines = (snap: Snapshot | null, e: AwayEntry, width: number, open: boolean): Line[] => {
+  const w = Math.max(16, width - 4)
+  const out: Line[] = []
+  const wrap = (text: string, tone: Tone = 'plain', lines = 3) => wrapText(text, w, lines).forEach(t => out.push([{ text: `    ${t}`, tone }]))
+  if (e.kind === 'decision') {
+    const d = snap?.decisions.find(x => x.id === e.key)
+    const pick = d?.options.find(o => o.key === (e.choice ?? d?.choice))
+    out.push([{ text: `결정 ${e.key} `, bold: true }, { text: d?.title ?? e.text }])
+    wrap(pick ? `→ ${pick.key}: ${pick.label}` : `→ ${e.text}`, 'ok')
+    if (open && d) {
+      wrap(`질문: ${d.question}`, 'dim', 4)
+      for (const o of d.options.filter(o => o.key !== pick?.key)) wrap(`다른 안 ${o.key}: ${o.label}${o.cons ? ` (단점: ${o.cons})` : ''}`, 'dim')
+      if (d.why) wrap(`추천 이유: ${d.why}`, 'dim')
+      out.push([{ text: `    종류 ${d.kind} · 작업 ${d.tasks.join(', ') || '-'}`, tone: 'dim' }])
+    }
+  } else {
+    const t = snap?.tasks.find(x => x.id === e.key)
+    out.push([{ text: `미리보기 ${e.key} `, bold: true }, { text: t?.title ?? e.text }])
+    wrap(`→ v${e.version ?? t?.preview.approved ?? '?'} 자동 승인`, 'ok', 1)
+  }
+  return out.map(l => fitLine(l, width))
+}
+
 /** 이 실행의 작업에서 같은 단계가 몇 번째인지(스냅샷 이벤트 기준). 모르면 null. */
 export const poolRound = (snap: Snapshot | null, r: Run): number | null => {
   if (!snap || !r.task || !r.pool || r.attempt === null) return null

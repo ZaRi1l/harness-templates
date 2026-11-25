@@ -733,3 +733,18 @@ test('에이전트 트리: 작업 줄은 ID를 자르지 않고 제목을 붙인
     .map(l => C.fitLine(l, 30).map(s => s.text).join(''))
   expect(narrow[1]).toContain('RECURRING-TX') // 좁아도 ID는 남고 제목이 줄어든다
 })
+
+test('자리 비운 동안 정한 것: 고른 안을 자르지 않고, 자세히는 다른 안·추천 이유를 보인다', async () => {
+  const long = '별도 recurring_rules 테이블을 추가하고 해당 월을 조회할 때 자동으로 거래를 생성한다(확장성 확보, 기존 데이터는 그대로)'
+  const snap = { ...SNAP, decisions: [{ ...SNAP.decisions[0]!, id: 'D-9', title: '정기 거래 저장 방식', kind: 'architecture', state: 'ANSWERED' as const, choice: 'A', by: 'away',
+    options: [{ key: 'A', label: long, pros: '', cons: '' }, { key: 'B', label: '기존 transactions에 recurring 열 추가', pros: '', cons: '기존 스키마 변경' }], why: '기존 데이터를 건드리지 않는다' }] }
+  const e = { at: '', kind: 'decision' as const, key: 'D-9', text: '…', reviewed: null, choice: 'A' }
+  const closed = C.awayLines(snap, e, 60, false).map(l => l.map(s => s.text).join(''))
+  expect(closed.length).toBeGreaterThan(2) // 줄바꿈해서 보인다
+  expect(closed[closed.length - 1]).toContain('데이터는 그대로)') // 끝까지 잘리지 않는다
+  expect(closed.join('')).not.toContain('다른 안')
+  const open = C.awayLines(snap, e, 120, true).map(l => l.map(s => s.text).join('')).join('\n')
+  expect(open).toContain('다른 안 B: 기존 transactions에 recurring 열 추가 (단점: 기존 스키마 변경)')
+  expect(open).toContain('추천 이유: 기존 데이터를 건드리지 않는다')
+  expect(open).toContain('종류 architecture')
+})

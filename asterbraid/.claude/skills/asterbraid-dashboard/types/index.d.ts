@@ -93,7 +93,7 @@ export type Snapshot = {
   dashboard_html: string
 }
 
-export type AwayEntry = { at: string; kind: 'decision' | 'preview'; key: string; text: string; reviewed: string | null }
+export type AwayEntry = { at: string; kind: 'decision' | 'preview'; key: string; text: string; reviewed: string | null; choice?: string; version?: number }
 
 /** 작업별 에이전트 토큰. 세션을 다시 열어도 남도록 $.store에 둔다(에이전트 id → 토큰, 못 쟀으면 null) */
 export type TaskTokens = Record<string, Record<string, number | null>>
