@@ -390,6 +390,9 @@ test('명령 탭: 버튼만으로 일시 중지·한도·우선순위를 바꾼�
   expect(calls.argv.find(a => a.includes('pause'))?.slice(-2)).toEqual(['pause', '--reason=TUI에서 일시 중지'])
   await ui.press({ key: 'inc-implement' })
   expect(calls.argv.find(a => a.includes('limit'))?.slice(-3)).toEqual(['limit', 'implement', '4'])
+  expect(await ui.find({ key: 'pri-up-DOC' })).toBeUndefined() // 우선순위는 작업 탭에서 바꾼다
+  await ui.press({ key: 'tab-tasks' })
+  await ui.press({ key: 'q-DOC' })
   await ui.press({ key: 'pri-up-DOC' })
   expect(calls.argv.find(a => a.includes('priority'))?.slice(-3)).toEqual(['priority', 'DOC', '1'])
   await ui.unmount()
@@ -755,4 +758,31 @@ test('에이전트 트리: 설계 작업이 아니면 "이 작업 뒤에 이어�
     .map(l => l.map(s => s.text).join(''))
   expect(text[1]).toContain('UI가 이 작업 뒤에 이어짐')
   expect(text[1]).not.toContain('계약')
+})
+
+test('유령 슬롯 경고는 슬롯을 잡은 지 1분이 지나서도 실행이 안 보일 때만', async () => {
+  const at = Date.parse('2026-11-24T10:00:00+09:00')
+  const snap = { ...SNAP, tasks: [task({ id: 'A', state: 'IMPLEMENTING', updated: '2026-11-24T10:00:00+09:00' })] }
+  expect(C.anomalies(snap, [], at + 10_000, 600_000).map(a => a.kind)).toEqual([])
+  expect(C.anomalies(snap, [], at + 61_000, 600_000).map(a => a.kind)).toEqual(['ghost'])
+})
+
+test('통합·지표: 통합은 커밋 범위만, 상태별 시간은 막대로', async () => {
+  const snap = { ...SNAP, integration_log: [{ time: '', status: 'MERGED', task: 'LABEL-FIX', message: "'integration' 23735d2 -> 7905f0b, 임시 worktree에서 병합·전체 테스트 통과" }],
+    metrics: { ...SNAP.metrics, seconds_by_state: { DESIGNING: 900, IMPLEMENTING: 720, AWAITING_APPROVAL: 36 } } }
+  const g = C.gitLines(snap, 70).map(l => l.map(s => s.text).join(''))
+  expect(g.some(t => t.includes('LABEL-FIX') && t.includes('23735d2 → 7905f0b') && !t.includes('임시'))).toBe(true)
+  const m = C.metricLines(snap, [], { costUsd: 58.11, contextPct: 12 }, 70).map(l => l.map(s => s.text).join(''))
+  const bars = m.filter(t => t.includes('█'))
+  expect(bars.length).toBe(3)
+  expect((bars[0]?.match(/█/g) ?? []).length).toBeGreaterThan((bars[1]?.match(/█/g) ?? []).length)
+  expect(m.join('\n')).not.toContain('컨텍스트') // 머리말에 있다
+  expect(m.join('\n')).toContain('$58.11')
+})
+
+test('활동: 긴 줄은 다음 줄로 넘긴다', async () => {
+  const long = 'BUDGET-OVERFLOW 경고: BUDGET-OVERFLOW 구현 슬롯을 잡았지만 이 세션에서 실행이 보이지 않는다(다른 세션일 수 있다)'
+  const out = C.activityLines(null, [{ atMs: 0, level: 'warn', source: 'mod', task: null, text: long }], false, 0, 50).map(l => l.map(s => s.text).join(''))
+  expect(out.length).toBe(2)
+  expect(out[1]?.startsWith(' '.repeat(12))).toBe(true)
 })

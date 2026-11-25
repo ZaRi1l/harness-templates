@@ -110,10 +110,14 @@ export const upsertRun = (runs: Run[], run: Run, max = 60): Run[] => {
 }
 
 /** 스케줄러 슬롯을 차지한 작업 중 이 세션에서 실행이 관측되지 않은 것. 배정과 실제 실행을 구분해 보여 준다. */
-export const unobservedHolders = (snap: Snapshot | null, runs: Run[]) =>
-  (snap?.tasks ?? []).filter(
-    t => RUNNING_STATES[t.state] && !runs.some(r => r.status === 'running' && r.task === t.id && r.pool === RUNNING_STATES[t.state]),
-  )
+export const GHOST_GRACE_MS = 60_000
+/** 슬롯은 잡혔는데 이 세션에서 실행이 안 보이는 작업. now를 주면 잡은 지 1분 안은 빼다(manager가 에이전트를 띄우는 중). */
+export const unobservedHolders = (snap: Snapshot | null, runs: Run[], now?: number) =>
+  (snap?.tasks ?? []).filter(t => {
+    if (!RUNNING_STATES[t.state] || runs.some(r => r.status === 'running' && r.task === t.id && r.pool === RUNNING_STATES[t.state])) return false
+    const since = now === undefined ? null : ms(t.updated)
+    return !(since !== null && now !== undefined && now - since >= 0 && now - since < GHOST_GRACE_MS)
+  })
 
 // ---------------------------------------------------------------- 민감 정보 마스킹
 
@@ -644,7 +648,7 @@ export const anomalies = (snap: Snapshot | null, runs: Run[], now: number, stall
     if (idle >= stallMs) out.push({ kind: 'stall', task: r.task, agentId: r.agentId, text: `${who} ${fmtDur(idle)}째 도구 호출 없음` })
     if (r.failStreak >= REPEAT_FAILS) out.push({ kind: 'repeat-fail', task: r.task, agentId: r.agentId, text: `${who} 도구 호출 ${r.failStreak}번 연속 실패·거부 (${r.lastTool})` })
   }
-  for (const t of unobservedHolders(snap, runs)) {
+  for (const t of unobservedHolders(snap, runs, now)) {
     out.push({ kind: 'ghost', task: t.id, agentId: null, text: `${t.id} ${mark(t.state).label} 슬롯을 잡았지만 이 세션에서 실행이 보이지 않는다` })
   }
   return out
@@ -1026,54 +1030,68 @@ export const timelineLines = (snap: Snapshot, now: number, width: number): Line[
   return out
 }
 
-export const gitLines = (snap: Snapshot, width: number): Line[] => {
-  const out: Line[] = [kv('통합 브랜치', `${snap.integration.branch ?? '-'} @ ${short(snap.integration.head, 10)}`)]
+/** 통합 기록 메시지에서 커밋 범위만 꺼낸다('integration' a -> b, …). 없으면 첫 줄. */
+const mergeRange = (message: string) => {
+  const m = /([0-9a-f]{7,40})\s*->\s*([0-9a-f]{7,40})/.exec(message)
+  return m ? `${short(m[1])} → ${short(m[2])}` : (message.split('\n')[0] ?? '')
+}
+
+export const gitLines = (snap: Snapshot, width: number, now = 0): Line[] => {
+  const out: Line[] = [section('통합', width)]
+  const queue = snap.tasks.filter(t => t.state === 'READY_TO_MERGE' || t.state === 'MERGING')
+  out.push([
+    { text: `${snap.integration.branch ?? '-'} @ ${short(snap.integration.head)}`, bold: true },
+    { text: ` · 대기열 ${queue.length ? queue.map(t => `${mark(t.state).mark}${t.id}`).join(' → ') : '비었음'}`, tone: 'dim' },
+  ])
+  const log = snap.integration_log.slice(-5).reverse()
+  const idW = Math.min(18, Math.max(6, ...log.map(e => strWidth(e.task))))
+  if (!log.length) out.push([{ text: '통합 기록 없음', tone: 'dim' }])
+  for (const e of log) {
+    const ok = e.status === 'MERGED'
+    out.push([
+      { text: ok ? '✓ ' : e.status === 'BUSY' ? '· ' : '✗ ', tone: ok ? 'ok' : e.status === 'BUSY' ? 'dim' : 'err' },
+      { text: `${pad(e.task, idW)} `, bold: true },
+      { text: ok ? mergeRange(e.message) : `${e.status} ${e.message.split('\n')[0] ?? ''}`, tone: ok ? 'plain' : 'err' },
+      { text: `  ${ago(ms(e.time), now)}`, tone: 'dim' },
+    ])
+  }
   const live = snap.tasks.filter(t => t.branch && t.state !== 'CANCELLED' && !(t.state === 'COMPLETED' && t.cleaned))
-  out.push(head('작업 브랜치'))
+  out.push(section('작업 브랜치', width))
   if (!live.length) out.push([{ text: '없음', tone: 'dim' }])
+  const tW = Math.min(18, Math.max(6, ...live.map(t => strWidth(t.id))))
   for (const t of live) {
     const m = mark(t.state)
-    const ev = t.evidence.valid === null ? '' : ` · 검증 ${t.evidence.valid}/${t.evidence.required}`
-    out.push([{ text: `${m.mark} `, tone: m.tone }, { text: `${pad(t.id, 10)} `, bold: true }, { text: `${t.branch} ${short(t.base)}→${short(t.head)}${ev}`, tone: 'dim' }])
-    if (t.state === 'COMPLETED' && !t.cleaned) out.push([{ text: '    정리 가능(sched cleanup이 조건을 다시 확인한다)', tone: 'dim' }])
-  }
-  const queue = snap.tasks.filter(t => t.state === 'READY_TO_MERGE' || t.state === 'MERGING')
-  out.push(head('통합 대기열'))
-  out.push(queue.length ? [{ text: queue.map(t => `${mark(t.state).mark}${t.id}`).join(' → ') }] : [{ text: '비었다', tone: 'dim' }])
-  out.push(head('최근 통합 결과'))
-  const log = snap.integration_log.slice(-8).reverse()
-  if (!log.length) out.push([{ text: '기록 없음', tone: 'dim' }])
-  for (const e of log) {
-    const tone: Tone = e.status === 'MERGED' ? 'ok' : e.status === 'BUSY' ? 'dim' : 'err'
-    out.push([{ text: `${pad(e.status, 9)}`, tone, bold: true }, { text: `${pad(e.task, 10)} ` }, { text: fit(e.message.split('\n')[0] ?? '', 60), tone: 'dim' }])
+    const tail = t.state === 'COMPLETED' ? '정리 가능' : t.evidence.valid === null ? m.label : `검증 ${t.evidence.valid}/${t.evidence.required}`
+    out.push([{ text: `${m.mark} `, tone: m.tone }, { text: `${pad(t.id, tW)} `, bold: true }, { text: `${short(t.base)}→${short(t.head)}  `, tone: 'dim' }, { text: tail, tone: t.state === 'COMPLETED' ? 'dim' : 'plain' }])
   }
   return out.map(l => fitLine(l, width))
 }
 
-export const metricLines = (snap: Snapshot, runs: Run[], usage: { costUsd: number | null; contextPct: number | null }): Line[] => {
+export const metricLines = (snap: Snapshot, runs: Run[], usage: { costUsd: number | null; contextPct: number | null }, width = 80): Line[] => {
   const m = snap.metrics as Record<string, unknown>
   const num = (k: string) => (typeof m[k] === 'number' ? (m[k] as number) : null)
   const p = progress(snap)
-  const peakObserved = peakRunning(runs)
+  const out: Line[] = [section('지표 (스케줄러 기록)', width)]
+  const wrap = (parts: string[]) => wrapText(parts.filter(Boolean).join(' · '), width, 3).forEach(t => out.push([{ text: t }]))
+  const lead = num('avg_lead_time_s')
+  const fail = num('verify_fail_rate')
+  wrap([
+    `완료 ${p.done}/${p.of}`, lead === null ? '' : `평균 리드타임 ${fmtDur(lead * 1000)}`, `재시도 ${num('retries_total') ?? 0}`,
+    fail === null ? '' : `검증 실패 ${Math.round(fail * 100)}%`, `병합 충돌 ${num('merge_conflicts') ?? 0}`, `통합 테스트 실패 ${num('integration_test_failures') ?? 0}`,
+  ])
+  const util = num('implement_slot_utilization')
+  wrap([`구현 동시 최대 ${num('implement_peak_parallel') ?? '-'}/${num('implement_slot_limit') ?? '-'}`, util === null ? '' : `슬롯 활용 ${Math.round(util * 100)}%`])
+  const by = Object.entries((m.seconds_by_state ?? {}) as Record<string, number>).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 6)
+  const top = by[0]?.[1] ?? 0
+  const cells = Math.max(4, Math.min(24, width - 22))
+  for (const [k, v] of by) {
+    const n = top ? Math.max(1, Math.round((v / top) * cells)) : 0
+    out.push([{ text: `${pad(mark(k).label, 8)} ` }, { text: '█'.repeat(n).padEnd(cells), tone: 'accent' }, { text: ` ${fmtDur(v * 1000)}`, tone: 'dim' }])
+  }
+  out.push(section('이 세션 (Mod 관측)', width))
   const tok = runs.reduce((n, r) => n + (r.tokens ?? 0), 0)
-  const by = (m.seconds_by_state ?? {}) as Record<string, number>
-  const lines: Line[] = [
-    head('스케줄러 기록 (sched.py)'),
-    kv('완료율', p.pct === null ? '-' : `${p.pct}% (${p.done}/${p.of}, 작업 수 기준)`),
-    kv('평균 리드타임', num('avg_lead_time_s') === null ? '-' : fmtDur(num('avg_lead_time_s')! * 1000)),
-    kv('구현 동시 실행 최대', `${num('implement_peak_parallel') ?? '-'} / 슬롯 ${num('implement_slot_limit') ?? '-'}`),
-    kv('구현 슬롯 활용률', num('implement_slot_utilization') === null ? '-' : `${Math.round(num('implement_slot_utilization')! * 100)}% (지금 한도 기준)`),
-    kv('재시도 합계', String(num('retries_total') ?? 0)),
-    kv('검증 실패율', num('verify_fail_rate') === null ? '-' : `${Math.round(num('verify_fail_rate')! * 100)}%`),
-    kv('병합 충돌 · 통합 테스트 실패', `${num('merge_conflicts') ?? 0} · ${num('integration_test_failures') ?? 0}`),
-    kv('상태별 누적', Object.entries(by).map(([k, v]) => `${mark(k).label} ${fmtDur(v * 1000)}`).join(' · ') || '-'),
-    head('이 세션에서 관측 (Mod)'),
-    kv('에이전트 동시 실행 최대', String(peakObserved)),
-    kv('에이전트 토큰 합', tok ? `${Math.round(tok / 1000)}k (각 에이전트 최근 요청 입력 + 출력, Claude Code 보고값)` : '-'),
-    kv('세션 비용', usage.costUsd === null ? '-' : `$${usage.costUsd.toFixed(2)} (추정, 청구액 아님)`),
-    kv('컨텍스트', usage.contextPct === null ? '-' : `${Math.round(usage.contextPct)}%`),
-  ]
-  return lines
+  wrap([`에이전트 동시 최대 ${peakRunning(runs)}`, tok ? `토큰 ${Math.round(tok / 1000)}k` : '', usage.costUsd === null ? '' : `비용 $${usage.costUsd.toFixed(2)} (추정, 청구액 아님)`])
+  return out.map(l => fitLine(l, width))
 }
 
 export const peakRunning = (runs: Run[]) => {
@@ -1102,16 +1120,18 @@ export const activityLines = (snap: Snapshot | null, activity: Activity[], error
   }
   const shown = rows.filter(r => !errorsOnly || r.level !== 'info').sort((a, b) => b.at - a.at).slice(0, 40)
   if (!shown.length) return [[{ text: errorsOnly ? '오류·경고가 없다' : '활동이 없다', tone: 'dim' }]]
-  return shown.map(r =>
-    fitLine(
-      [
+  const textW = Math.max(10, width - 12)
+  return shown.flatMap(r => {
+    const [first = '', ...rest] = wrapText(redact(stripControl(r.text)).replace(/\s+/g, ' '), textW, 2)
+    return [
+      fitLine([
         { text: r.level === 'error' ? '✗ ' : r.level === 'warn' ? '! ' : '· ', tone: r.level === 'error' ? 'err' : r.level === 'warn' ? 'warn' : 'dim' },
         { text: `${pad(ago(r.at, now), 9)} `, tone: 'dim' },
-        { text: redact(stripControl(r.text)).replace(/\s+/g, ' ') },
-      ],
-      width,
-    ),
-  )
+        { text: first },
+      ], width),
+      ...rest.map(t => fitLine([{ text: `${' '.repeat(12)}${t}` }], width)),
+    ]
+  })
 }
 
 export const miniLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], width: number, warns: Anomaly[] = []): Line[] => {

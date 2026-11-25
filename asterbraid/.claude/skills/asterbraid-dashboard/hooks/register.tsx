@@ -514,8 +514,7 @@ export const register: Register = (on, options) => {
 
     const commands = () => {
       const curLayout = view.layout ?? cfg.layout
-      const open = snap.tasks.filter(t => t.state !== 'COMPLETED' && t.state !== 'CANCELLED').sort((x, y) => y.priority - x.priority).slice(0, 8)
-      return (
+            return (
         <Box flexDirection="column">
           {line(C.section('화면', W))}
           <Box flexWrap="wrap" columnGap={1}>
@@ -575,20 +574,12 @@ export const register: Register = (on, options) => {
               })}
             </Box>
           )}
-          {can && open.length > 0 && line(C.section('우선순위 (높을수록 먼저 배정)', W))}
-          {can &&
-            open.map(t => (
-              <Box key={`pri-${t.id}`} columnGap={1}>
-                <Button key={`pri-up-${t.id}`} label="▲" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority + 1 })} />
-                <Button key={`pri-down-${t.id}`} label="▼" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority - 1 })} />
-                {line([{ text: `${C.pad(`p${t.priority}`, 4)} `, tone: 'accent' }, { text: `${C.pad(t.id, 8)} `, bold: true }, { text: C.fit(t.title, Math.max(8, W - 22)), tone: 'dim' }])}
-              </Box>
-            ))}
           {!can && <Text dimColor>읽기 전용 설정(allowActions=false)이라 상태를 바꾸는 버튼은 숨겼다</Text>}
           {line(C.section('같은 일을 하는 명령', W))}
-          {C.HELP.map((text, i) => (
-            <Text key={`help-${i}`} dimColor wrap="truncate">{text}</Text>
-          ))}
+          <Button key="toggle-help" label={view.expanded === 'help' ? '명령어 접기' : '명령어 보기'} onPress={() => setView($, v => ({ ...v, expanded: v.expanded === 'help' ? null : 'help' }))} />
+          {view.expanded === 'help' && C.HELP.flatMap((text, i) => C.wrapText(text, W, 3).map((t, j) => (
+            <Text key={`help-${i}-${j}`} dimColor wrap="truncate">{j ? `    ${t}` : t}</Text>
+          )))}
         </Box>
       )
     }
@@ -705,6 +696,17 @@ export const register: Register = (on, options) => {
                   <Button key={`q-${r.id}`} plain onPress={() => setView($, v => ({ ...v, expanded: v.expanded === r.id ? null : (r.id ?? null) }))}>
                     {r.line.map(seg)}
                   </Button>
+                  {can && view.expanded === r.id && (() => {
+                    const t = snap.tasks.find(x => x.id === r.id)
+                    return t && t.state !== 'COMPLETED' && t.state !== 'CANCELLED' ? (
+                      <Box columnGap={1}>
+                        <Text>{`   우선순위 p${t.priority}`}</Text>
+                        <Button key={`pri-up-${t.id}`} label="▲" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority + 1 })} />
+                        <Button key={`pri-down-${t.id}`} label="▼" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority - 1 })} />
+                        <Text dimColor>높을수록 먼저 배정</Text>
+                      </Box>
+                    ) : null
+                  })()}
                   {can && view.expanded === r.id && snap.tasks.find(t => t.id === r.id)?.state === 'BLOCKED' && (
                     <Box columnGap={1}>
                       <Text>{'   '}</Text>
@@ -746,7 +748,7 @@ export const register: Register = (on, options) => {
         case 'decisions':
           return decisions()
         case 'git':
-          return lines([...C.gitLines(snap, width), ...C.metricLines(snap, runs, usage).map(l => C.fitLine(l, width))])
+          return lines([...C.gitLines(snap, width, now), ...C.metricLines(snap, runs, usage, width)])
         case 'activity':
           return errors()
         case 'commands':
