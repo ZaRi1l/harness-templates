@@ -876,40 +876,87 @@ export const doneGroups = (snap: Snapshot | null, runs: Run[]) => {
   }
 }
 
+const padL = (s: string, w: number) => ' '.repeat(Math.max(0, w - strWidth(s))) + s
+const ROLE_W = 12
+const STEP_W = 24
+
+/** 완료된 작업인데 그 작업에 기대는 작업이 아직 진행 중이면 그 ID들(팀원을 남겨 둔 이유). */
+export const liveDependents = (snap: Snapshot | null, task: string) =>
+  (snap?.tasks ?? []).filter(t => t.deps.includes(task) && !['COMPLETED', 'CANCELLED'].includes(t.state)).map(t => t.id)
+
 /**
- * 에이전트 목록. 실행 중인 것을 위에 펼치고, 대기·끝난 것은 showDone일 때만 그 아래에 그린다
- * (섞여 있으면 지금 도는 것이 한눈에 안 보인다).
+ * 에이전트 탭: 작업별 트리. 작업 순서는 실행 중 에이전트가 있는 작업 → 대기 팀원만 있는 작업 → 끝난 작업(showDone일 때만),
+ * 작업 안에서는 실행 중 → 대기 → 끝남. 열을 맞추고, 좁으면 마지막 도구 → 토큰 → 도구 수 순으로 뺀다.
  */
-export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expanded: string | null, showDone = false): Line[] => {
+export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expanded: string | null, showDone = false, width = 90): Line[] => {
   const out: Line[] = []
-  const running = runningRuns(runs)
   const g = doneGroups(snap, runs)
+  const running = runningRuns(runs)
   if (runs.length === 0) out.push([{ text: '이 세션에서 관측한 서브에이전트가 없다', tone: 'dim' }])
-  else out.push(head(`실행 중 ${running.length}`))
-  if (runs.length && !running.length) out.push([{ text: '  지금 실행 중인 에이전트가 없다', tone: 'dim' }])
-  const draw = (r: Run) => {
-    const done = retired(snap, r)
+  else out.push(head(`실행 중 ${running.length} · 대기 ${g.idle.length} · 끝남 ${g.ended.length}`))
+  const ended = new Set(g.ended.map(r => r.agentId))
+  const rank = (r: Run) => (r.status === 'running' ? 0 : ended.has(r.agentId) ? 2 : 1)
+  const base = 5 + 2 + ROLE_W + 1 + STEP_W + 7 // 들여쓰기·가지, 기호, 역할, 단계, 시간
+  const cols = { tools: width >= base + 8, tokens: width >= base + 14, last: width >= base + 26 }
+
+  const row = (r: Run, branch: string) => {
+    const done = ended.has(r.agentId)
     const tone: Tone = r.status === 'running' ? 'accent' : r.status === 'completed' || done ? 'ok' : r.status === 'idle' ? 'dim' : 'err'
     const sym = r.status === 'running' ? '●' : r.status === 'completed' || done ? '✓' : r.status === 'idle' ? '◌' : '✗'
     const round = poolRound(snap, r)
+    const step = r.task
+      ? `${POOL_LABEL[r.pool ?? ''] ?? r.pool ?? ''}${round && round > 1 ? ` ${round}회차` : ''}${r.status === 'idle' && !done ? ' (팀원 대기)' : ''}`
+      : fit(r.description || '미연결', STEP_W)
     out.push([
+      { text: `  ${branch} `, tone: 'dim' },
       { text: `${sym} `, tone },
-      { text: pad(r.role, 12), bold: true },
-      { text: r.task ? `${r.task} ${POOL_LABEL[r.pool ?? ''] ?? r.pool}${round && round > 1 ? ` ${round}회차` : ''}` : '미연결(marker 없음)', tone: r.task ? 'plain' : 'warn' },
-      { text: ` · ${done ? '작업 끝남(팀원 대기) · ' : r.status === 'idle' ? '일 끝남(대기) · ' : ''}${fmtDur((r.endedMs ?? now) - r.startedMs)} · 도구 ${r.tools}${r.errors ? ` · 오류 ${r.errors}` : ''}${r.tokens !== null ? ` · ${Math.round(r.tokens / 1000)}k tok` : ''}`, tone: 'dim' },
+      { text: pad(r.role, ROLE_W), bold: true },
+      { text: ` ${pad(step, STEP_W)}`, tone: r.task ? 'plain' : 'warn' },
+      { text: padL(fmtDur((r.endedMs ?? now) - r.startedMs), 7), tone: 'dim' },
+      ...(cols.tools ? [{ text: padL(`도구 ${r.tools}`, 8), tone: (r.errors ? 'warn' : 'dim') as Tone }] : []),
+      ...(cols.tokens ? [{ text: padL(r.tokens !== null ? `${Math.round(r.tokens / 1000)}k` : '-', 6), tone: 'dim' as Tone }] : []),
+      ...(cols.last ? [{ text: `  ${r.lastTool || ''}${r.errors ? ` · 오류 ${r.errors}` : ''}`, tone: 'dim' as Tone }] : []),
     ])
-    out.push([{ text: `    ${r.lastTool || r.description}`, tone: 'dim' }])
     if (expanded === r.agentId) {
-      out.push(kv('    id', r.agentId))
-      out.push(kv('    폴더', r.cwd || '-'))
+      out.push(kv('       id', r.agentId))
+      out.push(kv('       폴더', r.cwd || '-'))
       const t = r.task ? snap?.tasks.find(x => x.id === r.task) : undefined
-      if (t) out.push(kv('    브랜치', `${t.branch ?? '-'} @ ${short(t.head)} · 스케줄러 상태 ${t.state}`))
+      if (t) out.push(kv('       브랜치', `${t.branch ?? '-'} @ ${short(t.head)} · 스케줄러 상태 ${t.state}`))
     }
   }
-  running.slice(0, 20).forEach(draw)
-  if (g.idle.length || g.ended.length) {
-    out.push(head(`대기 ${g.idle.length} · 끝남 ${g.ended.length}${showDone ? '' : ' (접힘)'}`))
-    if (showDone) [...g.idle, ...g.ended].slice(0, 20).forEach(draw) // 대기(다시 쓰일 수 있는 것) 먼저
+  const group = (id: string, rs: Run[]) => {
+    const t = snap?.tasks.find(x => x.id === id)
+    const m = t ? mark(t.state) : { mark: '?', label: '스냅샷에 없음', tone: 'warn' as Tone }
+    const waitFor = t && ['COMPLETED', 'CANCELLED'].includes(t.state) && rs.some(r => r.status === 'idle' && !ended.has(r.agentId)) ? liveDependents(snap, id) : []
+    out.push([
+      { text: `${m.mark} `, tone: m.tone },
+      { text: `${pad(id, 10)} `, bold: true },
+      { text: m.label, tone: m.tone },
+      ...(waitFor.length ? [{ text: ` · ${waitFor.join('·')}가 이 계약을 쓰는 중`, tone: 'dim' as Tone }] : []),
+    ])
+    const sorted = [...rs].sort((a, b) => rank(a) - rank(b) || b.startedMs - a.startedMs)
+    sorted.forEach((r, i) => row(r, i === sorted.length - 1 ? '└─' : '├─'))
+  }
+
+  const byTask = new Map<string, Run[]>()
+  for (const r of runs) {
+    if (r.task) byTask.set(r.task, [...(byTask.get(r.task) ?? []), r])
+  }
+  const tasks = [...byTask.entries()]
+    .map(([id, rs]) => ({ id, rs, rank: Math.min(...rs.map(rank)), last: Math.max(...rs.map(r => r.startedMs)) }))
+    .sort((a, b) => a.rank - b.rank || b.last - a.last)
+  for (const t of tasks.filter(x => x.rank < 2)) group(t.id, t.rs)
+  const doneTasks = tasks.filter(x => x.rank === 2)
+  const doneAgents = doneTasks.reduce((n, x) => n + x.rs.length, 0)
+  if (doneTasks.length) {
+    out.push(head(`── 끝남 ${doneAgents}${showDone ? '' : ' (접힘)'} ──`))
+    if (showDone) doneTasks.slice(0, 12).forEach(t => group(t.id, t.rs))
+  }
+  const unlinked = runs.filter(r => !r.task)
+  if (unlinked.length && (showDone || unlinked.some(r => r.status === 'running'))) {
+    out.push(head('미연결(marker 없음)'))
+    const shown = [...unlinked].sort((a, b) => rank(a) - rank(b)).filter(r => showDone || r.status === 'running')
+    shown.forEach((r, i) => row(r, i === shown.length - 1 ? '└─' : '├─'))
   }
   const missing = unobservedHolders(snap, runs)
   if (missing.length) {

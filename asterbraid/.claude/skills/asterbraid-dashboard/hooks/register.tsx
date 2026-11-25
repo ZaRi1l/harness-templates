@@ -732,7 +732,7 @@ export const register: Register = (on, options) => {
                 <Button key="toggle-done" label={view.showDone ? '대기·끝남 접기' : `대기·끝남 펼치기 (${runs.filter(r => r.status !== 'running').length})`}
                   onPress={() => setView($, v => ({ ...v, showDone: !v.showDone }))} />
               )}
-              {lines(C.agentLines(snap, runs, now, view.expanded, view.showDone).map(l => C.fitLine(l, width)))}
+              {lines(C.agentLines(snap, runs, now, view.expanded, view.showDone, width).map(l => C.fitLine(l, width)))}
             </Box>
           )
         case 'decisions':
@@ -761,7 +761,7 @@ export const register: Register = (on, options) => {
             <Box flexDirection="column" width={left}>{body(view.tab, left)}</Box>
             <Box flexDirection="column" width={right}>
               {line(C.section('에이전트', right))}
-              {lines(C.agentLines(snap, runs, now, null, false).slice(0, 14).map(l => C.fitLine(l, right)))}
+              {lines(C.agentLines(snap, runs, now, null, false, right).slice(0, 14).map(l => C.fitLine(l, right)))}
             </Box>
           </Box>
           {footer}

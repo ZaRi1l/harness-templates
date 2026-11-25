@@ -297,7 +297,7 @@ test('marker가 있는 에이전트만 작업에 연결한다', async ($, on) =>
   await spawn($, '아무 지시', 'Explore', '탐색')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
-  expect(await ui.find({ type: 'Text', text: /API 구현 ·/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /implementer\s+구현/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /미연결/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /실행이 관측되지 않은/ })).toBeUndefined()
   await ui.unmount()
@@ -493,7 +493,7 @@ test('같은 marker로 띄운 verifier 두 개가 모두 그려진다', async ($
   await spawn($, '[auto-task id=API pool=verify attempt=1]\n보안 검증', 'verifier', '보안 검증')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
-  const heads = await ui.findAll({ type: 'Text', text: /verifier\s+API 검증 ·/ })
+  const heads = await ui.findAll({ type: 'Text', text: /verifier\s+검증/ })
   expect(heads.length).toBe(2)
   await ui.unmount()
 })
@@ -504,7 +504,7 @@ test('agentId 없이 팀원 주소만 돌려주는 실행도 기록한다', asyn
   await spawn($, '[auto-task id=API pool=verify attempt=1]\n보안 검증', 'verifier', '보안 검증')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
-  expect(await ui.find({ type: 'Text', text: /verifier\s+API 검증 ·/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /verifier\s+검증/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -515,7 +515,7 @@ test('대기열: 펼친 작업에 설계 깊이와 노트를 보인다', async (
   expect(C.queueLines(SNAP, 'all', 'API', 120).some(r => r.line.map(s => s.text).join('').includes('설계 '))).toBe(false)
 })
 
-test('에이전트 탭: 실행 중을 위에 펼치고, 대기·끝남은 접어 두었다가 펼친다', async ($, on) => {
+test('에이전트 탭: 작업별로 묶고, 대기 팀원은 작업 아래에 보이며 끝난 것만 접는다', async ($, on) => {
   const calls = engine(on)
   await start($)
   await spawn($, '[auto-task id=API pool=implement attempt=1]\n구현', 'implementer', 'API 구현')
@@ -525,10 +525,9 @@ test('에이전트 탭: 실행 중을 위에 펼치고, 대기·끝남은 접어
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
   expect(await ui.find({ type: 'Text', text: /실행 중 1/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /implementer\s+API 구현 ·/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /designer\s+UI 미리보기 ·/ })).toBeUndefined() // 접혀 있다
-  await ui.press({ key: 'toggle-done' })
-  expect(await ui.find({ type: 'Text', text: /designer\s+UI 미리보기 · 일 끝남/ })).toBeDefined() // 대기 팀원의 머리 줄도 그린다
+  expect(await ui.find({ type: 'Text', text: /implementer\s+구현/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /designer\s+미리보기 \(팀원 대기\)/ })).toBeDefined() // UI가 아직 승인 대기라 다시 쓰일 수 있다
+  expect(await ui.find({ type: 'Text', text: /UI\s+승인/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -567,7 +566,8 @@ test('에이전트: 대기 먼저, 끝남은 아래. 작업과 그 작업에 기
   expect(g.ended.map(r => r.agentId).sort()).toEqual(['old', 'ver'])
   const text = C.agentLines(base, runs, 10, null, true).map(l => l.map(s => s.text).join(''))
   expect(text.findIndex(t => t.includes('architect'))).toBeLessThan(text.findIndex(t => t.includes('verifier')))
-  expect(text.some(t => t.includes('작업 끝남(팀원 대기)'))).toBe(true)
+  expect(text.find(t => t.startsWith('✓ C '))).toContain('X가 이 계약을 쓰는 중') // 완료인데 대기에 남은 이유
+  expect(text.some(t => t.includes('architect') && t.includes('(팀원 대기)'))).toBe(true)
   const later = { ...base, tasks: base.tasks.map(t => (t.id === 'X' ? { ...t, state: 'COMPLETED' as const } : t)) }
   expect(C.doneGroups(later, runs).idle).toEqual([])
 })
@@ -586,8 +586,8 @@ test('회차: 같은 단계를 몇 번째 하는지로 보이고 첫 번째는 �
   ] }
   expect(C.poolRound(snap, run({ task: 'UI', pool: 'implement', attempt: 3 }))).toBe(1)
   expect(C.poolRound(snap, run({ task: 'UI', pool: 'implement', attempt: 4 }))).toBe(2)
-  const line = C.agentLines(snap, [run({ task: 'UI', pool: 'implement', attempt: 4 })], 0, null)[1]?.map(s => s.text).join('') ?? ''
-  expect(line).toContain('UI 구현 2회차')
+  const line = C.agentLines(snap, [run({ task: 'UI', pool: 'implement', attempt: 4 })], 0, null)[2]?.map(s => s.text).join('') ?? ''
+  expect(line).toContain('구현 2회차')
 })
 
 test('작업 목록: 진행 중을 위에, 완료는 접고, 펼치면 걸린 시간·토큰·작게 표시', async () => {
@@ -671,4 +671,40 @@ test('미리보기 수정 요청은 한 번 더 확인한 뒤에만 보낸다(�
   await ui.press({ key: 'fb-send-UI' })
   expect(calls.argv.find(a => a.includes('revise'))?.slice(-4)).toEqual(['--version', '2', '--feedback=버튼을 더 크게', '--by', 'tui'].slice(-4))
   await ui.unmount()
+})
+
+test('에이전트 트리: 실행 중 작업 → 대기 작업 → 끝남(접힘), 미연결은 따로', async () => {
+  const snap = { ...SNAP, tasks: [task({ id: 'A', state: 'IMPLEMENTING' }), task({ id: 'B', state: 'AWAITING_APPROVAL' }), task({ id: 'Z', state: 'COMPLETED' })] }
+  const runs = [
+    run({ agentId: 'z', role: 'implementer', task: 'Z', pool: 'implement', attempt: 1, status: 'completed', startedMs: 0, endedMs: 5 }),
+    run({ agentId: 'b', role: 'designer', task: 'B', pool: 'preview', attempt: 1, status: 'idle', startedMs: 1, endedMs: 6 }),
+    run({ agentId: 'a', role: 'implementer', task: 'A', pool: 'implement', attempt: 1, startedMs: 2 }),
+    run({ agentId: 'x', role: 'Explore', description: '탐색', startedMs: 3 }),
+  ]
+  const t = (showDone: boolean) => C.agentLines(snap, runs, 60_000, null, showDone, 100).map(l => l.map(s => s.text).join(''))
+  const folded = t(false)
+  expect(folded[0]).toBe('실행 중 2 · 대기 1 · 끝남 1')
+  expect(folded.findIndex(x => x.startsWith('● A'))).toBeLessThan(folded.findIndex(x => x.startsWith('? B')))
+  expect(folded.some(x => x.includes('끝남 1 (접힘)'))).toBe(true)
+  expect(folded.some(x => x.startsWith('✓ Z'))).toBe(false)
+  expect(folded.findIndex(x => x.includes('미연결'))).toBeGreaterThan(folded.findIndex(x => x.includes('끝남 1')))
+  expect(t(true).some(x => x.startsWith('✓ Z'))).toBe(true)
+})
+
+test('에이전트 트리: 열을 한글 폭으로 맞추고, 좁으면 오른쪽 열부터 뺀다', async () => {
+  const snap = { ...SNAP, tasks: [task({ id: 'A', state: 'IMPLEMENTING' })] }
+  const runs = [
+    run({ agentId: 'd', role: 'designer', task: 'A', pool: 'preview', attempt: 1, status: 'idle', startedMs: 0, endedMs: 660_000, tools: 27, tokens: 21_000, lastTool: 'Write' }),
+    run({ agentId: 'i', role: 'implementer', task: 'A', pool: 'implement', attempt: 2, startedMs: 0, tools: 34, tokens: 53_000, lastTool: 'Bash' }),
+  ]
+  const rows = (w: number) => C.agentLines(snap, runs, 600_000, null, false, w).slice(2, 4)
+  const wide = rows(100)
+  const at = (l: C.Line, i: number) => C.lineWidth(l.slice(0, i))
+  for (const i of [3, 4, 5, 6]) expect(at(wide[0] ?? [], i)).toBe(at(wide[1] ?? [], i)) // 역할·단계·시간·도구 열 시작이 같다
+  expect(wide.map(l => l.map(s => s.text).join('')).join('\n')).toContain('Bash')
+  const narrow = rows(48).map(l => l.map(s => s.text).join(''))
+  expect(narrow.join('\n')).not.toContain('Bash')
+  expect(narrow.join('\n')).not.toContain('53k')
+  expect(narrow.join('\n')).not.toContain('도구 34')
+  expect(narrow[0]).toContain('implementer') // 실행 중이 대기보다 위
 })
