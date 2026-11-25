@@ -22,9 +22,9 @@
 |---|---|---|
 | `manager` | opus | 사용자와 대화하는 개발 책임자. 작업 분할·배정·통합 지시·결정 요청. 직접 구현하지 않는다. `claude --agent manager`로 실행 |
 | `researcher` | sonnet | (선택) 공개 자료 조사 → 작업 노트 |
-| `architect` | opus | (선택, `--needs-design` 또는 deep) 설계 깊이에 맞춘 인터페이스·데이터·오류 계약과 작업 분할 → 작업 노트. `architecture-design` 스킬을 미리 불러온다 |
+| `architect` | fable | (선택, `--needs-design` 또는 deep) 설계 깊이에 맞춘 인터페이스·데이터·오류 계약과 작업 분할 → 작업 노트. `architecture-design` 스킬을 미리 불러온다 |
 | `designer` | sonnet | (선택, `--preview`) 구현 전 미리보기 HTML. `preview-workflow` 스킬을 미리 불러오고, 디자인 스킬은 있으면 골라 쓴다 |
-| `implementer` | inherit | worktree에서 구현·테스트·커밋·제출 |
+| `implementer` | opus | worktree에서 구현·테스트·커밋·제출 |
 | `verifier` | sonnet | 읽기 전용 독립 검증, 판정을 커밋에 묶어 기록 |
 | `Explore` (내장) | | 코드 위치·구조 탐색 |
 

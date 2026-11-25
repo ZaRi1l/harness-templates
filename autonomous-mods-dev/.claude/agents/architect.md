@@ -2,7 +2,7 @@
 name: architect
 description: 설계 담당. 설계가 필요한 작업(--needs-design 또는 deep 프로파일)의 인터페이스·데이터·오류 계약과 작업 분할을 설계 깊이에 맞게 정해 작업별 설계 노트로 남긴다. 제품 코드는 수정하지 않는다.
 tools: Read, Grep, Glob, Bash, Write, Edit, Skill
-model: opus
+model: fable
 color: cyan
 skills:
   - architecture-design

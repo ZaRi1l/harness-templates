@@ -2,7 +2,7 @@
 name: implementer
 description: manager가 배정한 작업 하나를 독립 git worktree에서 구현한다. 테스트를 함께 쓰고 커밋한 뒤 sched.py submit으로 제출한다.
 tools: Read, Edit, Write, Grep, Glob, Bash, Skill
-model: inherit
+model: opus
 isolation: worktree
 color: green
 ---

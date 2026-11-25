@@ -63,6 +63,7 @@ CLAUDE.md                                   규칙 (TODO 채우기)
 .claude/skills/autonomous-dashboard/        관제 Mod (Claude Code 플러그인, 자동 로드)
 .claude/skills/preview-workflow/            미리보기 제작·등록·검토 절차 스킬
 .claude/skills/architecture-design/         설계 깊이별 design.md 형식·규칙 (deep 점검표는 references/)
+.claude/skills/harness-bootstrap/           시작 준비 절차와 verify.config.json 키 설명 (manager가 처음 한 번 부른다)
 .claude/previewUI/preview.html              미리보기 대시보드 화면 소스
 ```
 AI 도구의 소스·설정은 모두 `.claude/`에, 실행 중에 생기는 상태·결과물은 `.git/claude-auto/`에 둔다(저장소 밖이라 커밋되지 않는다).

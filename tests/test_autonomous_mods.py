@@ -407,6 +407,13 @@ class TestBootstrap(unittest.TestCase):
     """manager의 '시작 준비' 절차가 프로그램과 맞는지: 템플릿 + 설계 문서만 있는 저장소에서 시작한다."""
     TEMPLATE = Path(base.__file__).resolve().parent.parent / MODS
 
+    def bootstrap_text(self):
+        """시작 준비 절차는 harness-bootstrap 스킬에 있고, manager.md는 그 스킬을 가리킨다."""
+        manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
+        self.assertIn("harness-bootstrap", manager)
+        self.assertIn("Skill", manager.split("---", 2)[1])
+        return (self.TEMPLATE / ".claude/skills/harness-bootstrap/SKILL.md").read_text(encoding="utf-8")
+
     def test_fresh_repo_with_only_template_reaches_init(self):
         import shutil
         import tempfile
@@ -436,18 +443,18 @@ class TestBootstrap(unittest.TestCase):
         r = sched("init")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout)["integration_branch"], "integration")
-        manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
+        manager = self.bootstrap_text()
         self.assertLess(manager.index("커밋하기 전에** `git switch -c integration`"), manager.index("커밋한다(`chore: 하네스 시작 준비`)"))
 
     def test_gitignore_lines_cover_paths_the_harness_creates(self):
-        manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
+        manager = self.bootstrap_text()
         integrate = (self.TEMPLATE / ".claude/hooks/integrate.py").read_text(encoding="utf-8")
         self.assertIn('root / ".claude" / "worktrees"', integrate)
         for line in (".claude/worktrees/", ".claude/settings.local.json"):
             self.assertIn(f"`{line}`", manager)
 
     def test_every_verify_config_key_is_explained_to_manager(self):
-        manager = (self.TEMPLATE / ".claude/agents/manager.md").read_text(encoding="utf-8")
+        manager = self.bootstrap_text()
         keys = set(json.loads((self.TEMPLATE / ".claude/hooks/verify.config.json").read_text(encoding="utf-8"))) - {"_comment"}
         self.assertEqual(sorted(k for k in keys if f"`{k}`" not in manager), [])
 

@@ -28,7 +28,7 @@
 | 대시보드 승인 버튼 | 두지 않는다. 로컬 서버도 없다 | 정적 HTML 버튼은 상태를 바꿀 수 없고, 서버는 공격면이다. 승인은 Pane·CLI·manager |
 | 미리보기 격리 | `sandbox="allow-scripts"` iframe | 미리보기 코드가 부모 페이지·승인 흐름에 닿지 않는다 |
 | designer 스킬 | `preview-workflow`만 미리 불러오고, 디자인 스킬은 있으면 `Skill`로 | 외부 스킬이 없는 환경에서도 동작. 이름이 설치 방법마다 달라 미리 불러오기가 깨진다 |
-| 시작 준비 | 템플릿 + 설계 문서만 넣으면 manager가 `CLAUDE.md` TODO·`verify.config.json`·`.gitignore`를 채워 확인받고, 커밋·`integration` 생성·`sched init` | 사람이 기억해야 하는 수동 단계를 없앤다. 테스트 명령·검토 기준은 설계 문서에서 나오므로 문서를 읽는 manager가 채우는 것이 정확하다. 테스트 설정 수정은 승인 창으로 사람이 한 번 본다 |
+| 시작 준비 | (절차는 `harness-bootstrap` 스킬, 처음 한 번만 불러 manager 프롬프트를 가볍게 둔다) 템플릿 + 설계 문서만 넣으면 manager가 `CLAUDE.md` TODO·`verify.config.json`·`.gitignore`를 채워 확인받고, 커밋·`integration` 생성·`sched init` | 사람이 기억해야 하는 수동 단계를 없앤다. 테스트 명령·검토 기준은 설계 문서에서 나오므로 문서를 읽는 manager가 채우는 것이 정확하다. 테스트 설정 수정은 승인 창으로 사람이 한 번 본다 |
 | 직접 git 권한 | `git merge`·`git worktree remove` 허용, rebase·`reset --hard`·`branch -D`·`remote`는 승인 필요 | 실제 사용에서 승인 요청이 자동 루프를 멈췄다(사용자 경험). 프로그램 경유 병합은 원래 규칙과 무관하고, 직접 병합 금지는 지침으로 남는다 |
 | 일시 중지 | 새 `start`만 거부. 실행 중 에이전트·검증·통합은 계속 | 에이전트를 강제로 멈추는 API가 스케줄러에 없고, 반쯤 한 작업을 버리지 않는다 |
 | 이상 감지 | 긴 단계는 `sched.py`(과거 중앙값 3배·10분·표본 3), 멈춤·연속 실패·유령 슬롯은 Mod. 경고만 한다 | 상주 LLM 감독관보다 싸고 재현된다. 원인 판단은 manager 하나만 한다 |
@@ -37,6 +37,7 @@
 | 화면 상태 | `$.state`(세션). 리로드에 남고 새 세션은 기본값 | 탭·필터는 개인 화면 상태다. 개발 규칙 설정은 `auto.config.json`에만 둔다 |
 | 설계 필요성 (2026-11-25) | 작업마다 `design_depth`(light/standard/deep, `--needs-design`). 프로파일·위험도(검증 수)와 별개. deep 프로파일은 자동 deep | 위험이 낮아도 공통 계약을 여러 작업이 쓰면 설계가 필요하다. e2e 두 번 모두 UI가 CORE 계약에 의존 관계 없이 기댔다 |
 | 설계 형식 | `architecture-design` 스킬(architect만 미리 불러옴). deep 점검표는 `references/`로 분리 | 깊이마다 필수 항목을 정해 implementer가 추측하지 않게. 긴 점검표는 deep일 때만 읽어 컨텍스트를 아낀다 |
+| 에이전트 모델 (2026-11-25) | manager·implementer opus, architect fable, 나머지 sonnet | implementer는 `inherit`이면 세션을 어떻게 열었는지에 따라 모델이 바뀌어 opus로 고정했다(지금까지의 e2e와 같은 품질). architect는 실행 횟수가 적고 어려운 추론이 몰려, 가격 2배인 fable의 효과가 가장 크다. manager는 짧은 판단을 오래 반복해 fable의 긴 응답·비용이 불리하다 |
 | 외부 방법론 스킬 | implementer에게 superpowers TDD·디버깅·완료 검증을 "있으면 사용"으로만 안내. 필수로 미리 불러오지 않는다 | 설치 여부·이름이 환경마다 다르다. 그 스킬들의 자체 worktree·서브에이전트·병합 절차는 스케줄러와 겹치므로 쓰지 않는다 |
 | 조사만 하는 작업 | `sched done --close`(노트 필수, 브랜치 있으면 거부) | 1차 e2e에서 진단 작업을 닫을 길이 없어 BLOCKED로 쌓였다 |
 | 정리 미리보기 | `sched cleanup --dry-run` | 자동 모드 분류기가 대상이 안 보이는 정리를 거부했다(2차 e2e). 목록을 먼저 보이면 사람과 분류기가 판단할 수 있다 |
