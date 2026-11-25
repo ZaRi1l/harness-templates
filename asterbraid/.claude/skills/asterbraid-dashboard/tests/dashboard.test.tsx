@@ -722,3 +722,14 @@ test('처음 열면(시작 준비 전) 빈 스냅샷을 만들어 명령 탭 버
   expect(calls.argv.find(a => a.includes('away'))?.slice(-3)).toEqual(['away', '--previews', '--reason=TUI에서 자리 비움'])
   await ui.unmount()
 })
+
+test('에이전트 트리: 작업 줄은 ID를 자르지 않고 제목을 붙인다', async () => {
+  const snap = { ...SNAP, tasks: [task({ id: 'RECURRING-TX', title: '정기 거래 등록·자동 입력', state: 'DESIGNING' })] }
+  const lines = C.agentLines(snap, [run({ task: 'RECURRING-TX', pool: 'design', attempt: 1, role: 'architect' })], 0, null, false, 72)
+    .map(l => C.fitLine(l, 72).map(s => s.text).join(''))
+  expect(lines[1]).toContain('RECURRING-TX  설계')
+  expect(lines[1]).toContain('정기 거래 등록')
+  const narrow = C.agentLines(snap, [run({ task: 'RECURRING-TX', pool: 'design', attempt: 1, role: 'architect' })], 0, null, false, 30)
+    .map(l => C.fitLine(l, 30).map(s => s.text).join(''))
+  expect(narrow[1]).toContain('RECURRING-TX') // 좁아도 ID는 남고 제목이 줄어든다
+})

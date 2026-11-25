@@ -930,9 +930,10 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
     const waitFor = t && ['COMPLETED', 'CANCELLED'].includes(t.state) && rs.some(r => r.status === 'idle' && !ended.has(r.agentId)) ? liveDependents(snap, id) : []
     out.push([
       { text: `${m.mark} `, tone: m.tone },
-      { text: `${pad(id, 10)} `, bold: true },
+      { text: `${id}  `, bold: true }, // ID는 자르지 않는다(무슨 작업인지 알아보게)
       { text: m.label, tone: m.tone },
       ...(waitFor.length ? [{ text: ` · ${waitFor.join('·')}가 이 계약을 쓰는 중`, tone: 'dim' as Tone }] : []),
+      ...(t?.title ? [{ text: ` · ${t.title}` }] : []), // 폭이 모자라면 제목 끝부터 줄어든다
     ])
     const sorted = [...rs].sort((a, b) => rank(a) - rank(b) || b.startedMs - a.startedMs)
     sorted.forEach((r, i) => row(r, i === sorted.length - 1 ? '└─' : '├─'))
