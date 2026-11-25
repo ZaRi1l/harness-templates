@@ -191,6 +191,49 @@ class TestCloseResearch(ModsCase):
         self.assertEqual(self.state("A")["state"], "BLOCKED")
 
 
+class TestNeedsDesign(ModsCase):
+    """설계 필요성을 위험도와 따로 정한다: 위험이 낮아도 공통 계약이면 architect를 거친다."""
+
+    def test_low_risk_task_can_require_design(self):
+        out = self.add("API", risk="low", needs_design=True)
+        self.assertEqual((out["state"], out["profile"]), ("PENDING", "fast"))  # 검증 정책(프로파일)은 그대로
+        nxt = self.ok("next", "--pool", "design")
+        self.assertEqual([(t["id"], t["design_depth"]) for t in nxt["dispatch"]], [("API", "standard")])
+        self.ok("start", "API", "--pool", "design", "--agent", "architect")
+        self.assertEqual(self.ok("done", "API", "--notes", "notes/API/design.md")["state"], "READY")
+        self.assertEqual(self.task(self.snapshot(), "API")["design_depth"], "standard")
+
+    def test_depth_choice_and_deep_profile_default(self):
+        self.add("A", risk="low", needs_design="light")
+        self.assertEqual(self.ok("next", "--pool", "design")["dispatch"][0]["design_depth"], "light")
+        self.add("B", paths="b/", risk="high")
+        self.assertEqual(self.task(self.snapshot(), "B")["design_depth"], "deep")  # deep 프로파일은 deep 설계
+        self.assertIn("invalid choice", self.refused("add", "--id", "C", "--title", "c", "--criteria", "c",
+                                                     "--paths", "c/", "--needs-design", "huge"))
+
+    def test_plain_task_needs_no_design(self):
+        out = self.add("X", risk="low")
+        self.assertEqual(out["state"], "READY")
+        self.assertIsNone(self.task(self.snapshot(), "X")["design_depth"])
+
+
+class TestCleanupDryRun(ModsCase):
+    """e2e2: 자동 모드가 대상이 안 보이는 cleanup을 거부했다. 먼저 지울 목록만 보여 줄 수 있어야 한다."""
+
+    def test_dry_run_lists_targets_without_removing(self):
+        wa = self.ready_to_merge("A", {"src/a.py": "A = 1\n"}, paths="src/a.py")
+        self.assertEqual(self.integrate("A")[:2], (0, "MERGED"))
+        plan = self.ok("cleanup", "--dry-run")
+        self.assertEqual(plan["A"]["cleaned"], False)
+        self.assertEqual(Path(plan["A"]["would_remove"]["worktree"]), wa)
+        self.assertIn("task-A", plan["A"]["would_remove"]["branches"])
+        self.assertTrue(wa.is_dir())  # 아무것도 지우지 않는다
+        self.assertNotEqual(self.repo.git("branch", "--list", "task-A"), "")
+        self.assertFalse(self.state("A")["cleaned"])
+        self.assertEqual(self.ok("cleanup")["A"], {"cleaned": True})  # 그다음 실제 정리
+        self.assertFalse(wa.exists())
+
+
 class TestPreviewContract(ModsCase):
     def test_approve_checks_version_and_hash(self):
         shas = self.preview_ready(versions=2)
@@ -329,6 +372,35 @@ class TestModManifest(unittest.TestCase):
         core = (self.MOD / "hooks/core.ts").read_text(encoding="utf-8")
         parse = core[core.index("export const parseConfig"):]
         self.assertEqual(options, set(re.findall(r"\bo\.(\w+)", parse)))
+
+
+class TestAgentSkills(unittest.TestCase):
+    """에이전트가 미리 불러오는 스킬은 템플릿 안에 있어야 한다(없으면 에이전트가 읽었다고 착각한다)."""
+    CLAUDE = Path(base.__file__).resolve().parent.parent / MODS / ".claude"
+
+    def frontmatter(self, path):
+        text = path.read_text(encoding="utf-8")
+        return text.split("---", 2)[1]
+
+    def test_preloaded_skills_exist_and_agents_can_call_skill(self):
+        seen = {}
+        for agent in sorted((self.CLAUDE / "agents").glob("*.md")):
+            fm = self.frontmatter(agent)
+            skills = re.findall(r"^\s+-\s+([\w-]+)\s*$", fm.split("skills:", 1)[1], re.M) if "skills:" in fm else []
+            for name in skills:
+                skill = self.CLAUDE / "skills" / name / "SKILL.md"
+                self.assertTrue(skill.is_file(), f"{agent.name}: {name}")
+                self.assertIn(f"name: {name}", self.frontmatter(skill))
+                self.assertIn("Skill", re.search(r"^tools:(.*)$", fm, re.M).group(1), agent.name)
+            seen[agent.stem] = skills
+        self.assertEqual(seen["architect"], ["architecture-design"])
+        self.assertEqual(seen["designer"], ["preview-workflow"])
+
+    def test_skill_references_resolve(self):
+        for skill in (self.CLAUDE / "skills").glob("*/SKILL.md"):
+            text = skill.read_text(encoding="utf-8")
+            for ref in re.findall(r"`(references/[\w./-]+)`", text):
+                self.assertTrue((skill.parent / ref).is_file(), f"{skill.parent.name}: {ref}")
 
 
 class TestBootstrap(unittest.TestCase):

@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: manager가 배정한 작업 하나를 독립 git worktree에서 구현한다. 테스트를 함께 쓰고 커밋한 뒤 sched.py submit으로 제출한다.
-tools: Read, Edit, Write, Grep, Glob, Bash
+tools: Read, Edit, Write, Grep, Glob, Bash, Skill
 model: inherit
 isolation: worktree
 color: green
@@ -16,11 +16,15 @@ color: green
 - `git merge`·`rebase`를 직접 하지 않는다. 통합 브랜치를 가져올 때는 `sched sync <작업 ID>`를 쓴다.
 - 패키지 설치, `.claude/` 수정, 테스트 삭제·완화·건너뛰기를 하지 않는다.
 - 확정되지 않은 설계를 추측으로 구현하지 않는다. 설계 노트·승인된 미리보기와 다르게 가야 하면 보고한다.
+- 설계 노트(`design.md`)의 계약(인터페이스, 입력·출력·오류, 데이터)을 조용히 바꾸지 않는다. 바꿔야 하면 멈추고
+  이유와 바꿀 내용을 manager에게 보고한다(설계 재검토를 거친다). verifier가 계약 준수를 검사한다.
 
 ## 순서
 1. 지시문의 작업 ID, 담당 경로, 완료 기준, 노트 경로, 승인된 미리보기를 확인한다.
 2. 재작업이거나 충돌 통보를 받았으면 먼저 `sched sync <작업 ID>`. CONFLICT면 충돌을 풀고 `git add` 후 `git commit`.
-3. 구현과 테스트를 함께 쓴다: 정상 사례, 오류 사례, 고친 버그의 회귀 사례.
+3. 구현과 테스트를 함께 쓴다: 정상 사례, 오류 사례, 고친 버그의 회귀 사례. 설계 노트의 테스트 기준을 빠짐없이 옮긴다.
+   세션에 있으면 써도 되는 스킬: `test-driven-development`(새 동작), `systematic-debugging`(원인을 모르는 실패. 원인을 확인하기 전에 고치지 않는다),
+   `verification-before-completion`(완료 보고 전). 없으면 같은 원칙으로 한다. 이 스킬들이 시키는 별도 worktree·서브에이전트·병합은 하지 않는다.
 4. `CLAUDE.md`의 테스트 명령으로 관련 테스트, 이어서 전체 테스트를 돌린다. 환경 문제로 못 돌리면 BLOCKED로 보고한다.
 5. 커밋한다(`CLAUDE.md`의 커밋 규칙).
 6. `sched submit <작업 ID>`. 거부되면 사유(커밋 안 된 변경, 담당 경로 밖 변경 등)를 고친 뒤 다시 제출한다.

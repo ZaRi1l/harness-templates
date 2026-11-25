@@ -44,6 +44,9 @@ flowchart TD
 | 에이전트 ↔ 작업 연결 | 없음 | `start`가 준 marker로 연결, 없으면 "미연결" |
 | 이상 감지 | 없음 | 긴 단계(스케줄러), 멈춤·연속 실패·유령 슬롯(Mod). 경고만 하고 판단은 manager |
 | 처음 설정 | 사람이 TODO·테스트 설정·`.gitignore`·통합 브랜치를 준비 | 템플릿 + 설계 문서만 넣으면 manager가 준비하고 확인받는다 |
+| 설계 | deep 프로파일(위험도 high)에서만 architect | `--needs-design [light\|standard\|deep]`로 위험도와 따로 정한다. architect는 `architecture-design` 스킬의 깊이별 형식으로 계약(인터페이스·데이터·오류)과 작업 분할을 쓴다 |
+| 조사·설계만 하는 작업 | 없음 | `sched done ID --close --notes …`로 구현 없이 완료 |
+| 정리 | `sched cleanup` | + `--dry-run`으로 지울 worktree·브랜치 목록을 먼저 보인다 |
 | 필요한 것 | Claude Code | Claude Code 2.1.331에서 검증(Mods API는 early access) |
 
 고르는 법: Mods를 쓸 수 없거나 화면 없이 안정적인 엔진만 필요하면 `autonomous-parallel-dev`. 사용자가 대화하며 진행을 지켜보고 결정·검토를 자주 해야 하면 이 템플릿.
@@ -59,6 +62,7 @@ CLAUDE.md                                   규칙 (TODO 채우기)
 .claude/agents/                             manager, researcher, architect, designer, implementer, verifier
 .claude/skills/autonomous-dashboard/        관제 Mod (Claude Code 플러그인, 자동 로드)
 .claude/skills/preview-workflow/            미리보기 제작·등록·검토 절차 스킬
+.claude/skills/architecture-design/         설계 깊이별 design.md 형식·규칙 (deep 점검표는 references/)
 .claude/previewUI/preview.html              미리보기 대시보드 화면 소스
 ```
 AI 도구의 소스·설정은 모두 `.claude/`에, 실행 중에 생기는 상태·결과물은 `.git/claude-auto/`에 둔다(저장소 밖이라 커밋되지 않는다).
@@ -143,6 +147,23 @@ manager가 중요한 선택을 만나면 결정을 열고(`sched decide add`, �
 - 미리보기 파일은 `.html`/`.htm`만 등록·열기한다(OS 기본 프로그램으로 다른 형식을 실행하지 않게).
 - 승인한 버전의 해시가 검증 기준에 들어간다. 승인이 바뀌면 이전 검증 증거는 무효다. 승인 기록에는 시각·누가·당시 완료 기준 해시도 남는다(기록용).
 - 대시보드는 읽기 전용이다. 승인 버튼이 없고 로컬 서버도 없다. 미리보기는 `sandbox="allow-scripts"` iframe으로만 띄워, 미리보기 안의 코드가 대시보드나 승인에 닿지 못한다.
+
+## 설계 깊이
+manager가 작업마다 정한다. 위험도(검증 수)와 별개다.
+| 깊이 | 쓰는 곳 | design.md에 반드시 |
+|---|---|---|
+| light | 범위가 분명한 작은 변경 | 바꿀 파일·인터페이스, 영향 범위, 경계·오류 조건, 테스트 방법 |
+| standard | 일반 기능, 여러 모듈 연동, 여러 작업이 쓰는 계약 | + 대안 비교, 모듈 책임·의존 방향, 공개 인터페이스 계약(입력·출력·오류), 데이터 모델, 작업별 담당 경로 |
+| deep | 핵심 구조, 복잡한 알고리즘, 데이터 무결성·보안 (deep 프로파일은 자동) | + 상태 전이, 동시성, 장애·복구, 보안, 비기능 목표, 마이그레이션 (`references/deep-checklist.md`) |
+
+implementer는 설계 계약을 조용히 바꾸지 않고 manager에게 보고하고, verifier는 계약을 지켰는지 검토한다.
+verifier는 한 번 검증할 때 막는 결함을 모두 적는다(라운드마다 하나씩 찾아 재시도 한도를 다 쓰지 않게).
+
+## 선택 스킬
+있으면 쓰고 없으면 같은 원칙으로 한다. 설치는 사용자가 한다. 스킬이 시키는 별도 worktree·서브에이전트·병합은 하지 않는다(스케줄러와 겹친다).
+| 스킬 | 쓰는 에이전트 | 쓰는 곳 |
+|---|---|---|
+| test-driven-development, systematic-debugging, verification-before-completion (superpowers) | implementer | 새 동작, 원인을 모르는 실패, 완료 보고 전 |
 
 ## 디자인 스킬 (선택)
 designer는 세션에 있는 것만 `Skill`로 골라 쓴다. 없으면 기본 절차로 만든다. 설치는 사용자가 한다.

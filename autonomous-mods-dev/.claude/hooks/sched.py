@@ -87,6 +87,7 @@ SLOT_STATE = {"research": "RESEARCHING", "design": "DESIGNING", "preview": "PREV
               "implement": "IMPLEMENTING"}
 # 아직 통합되지 않은 변경을 가진 작업은 담당 경로를 계속 잡고 있다
 PATH_HOLDERS = {"IMPLEMENTING", "RETRY", "VERIFYING", "READY_TO_MERGE", "MERGING"}
+DESIGN_DEPTHS = ("light", "standard", "deep")  # autonomous-mods-dev 추가: 설계 필요성을 위험도와 따로 정한다
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")  # 경로(previews/<ID>)와 marker에 그대로 쓴다
 DECISION_KINDS = ("ui", "ux", "architecture", "data", "breaking", "dependency", "requirements", "direction",
                   "environment", "limit", "other")
@@ -273,7 +274,7 @@ def transition(t: dict, new: str, reason: str = "", force: bool = False, **field
 def needs(cfg: dict, t: dict) -> tuple[bool, bool, bool]:
     """아직 남은 사전 단계: (조사, 설계, 미리보기 승인). 이 순서로 진행한다."""
     prof = cfg["profiles"][t["profile"]]
-    return (prof["research"] and not t["researched"], prof["design"] and not t["designed"],
+    return (prof["research"] and not t["researched"], (prof["design"] or bool(t.get("design_depth"))) and not t["designed"],
             t["preview"]["required"] and t["preview"]["approved"] is None)
 
 
@@ -374,11 +375,17 @@ def new_task(cfg: dict, spec: dict) -> dict:
             "fast" if risk == "low" else "standard"
     if profile not in cfg["profiles"]:
         raise Refused(f"모르는 프로파일: {profile}")
+    depth = spec.get("needs_design") or None
+    depth = "standard" if depth is True else depth
+    if depth is None and cfg["profiles"][profile]["design"]:
+        depth = "deep" if profile == "deep" else "standard"
+    if depth is not None and depth not in DESIGN_DEPTHS:
+        raise Refused(f"설계 깊이는 {DESIGN_DEPTHS} 중 하나다: {depth}")
     paths = [norm(p) for p in spec["paths"]]
     t = {"id": str(spec["id"]), "title": spec["title"], "criteria": spec["criteria"], "paths": paths,
          "forbid": [norm(p) for p in spec.get("forbid", [])], "deps": [str(d) for d in spec.get("deps", [])],
          "priority": int(spec.get("priority", 0)), "risk": risk, "profile": profile, "state": "PENDING",
-         "researched": False, "designed": False, "agent": None, "branch": None, "worktree": None,
+         "researched": False, "designed": False, "design_depth": depth, "agent": None, "branch": None, "worktree": None,
          "base": None, "head": None, "old_branches": [], "evidence": [], "notes": [], "retries": 0, "attempts": 0,
          "reason": "", "history": [], "created": now(), "updated": now(), "completed": None, "cleaned": False,
          "preview": {"required": bool(spec.get("preview")), "versions": [], "approved": None, "feedback": []}}
@@ -460,7 +467,7 @@ def cmd_add(a, root, cfg):
     spec = {"id": a.id, "title": a.title, "criteria": a.criteria, "paths": a.paths.split(","),
             "forbid": a.forbid.split(",") if a.forbid else [], "deps": a.deps.split(",") if a.deps else [],
             "priority": a.priority, "risk": a.risk, "profile": a.profile, "needs_research": a.needs_research,
-            "preview": a.preview}
+            "needs_design": a.needs_design, "preview": a.preview}
     with store(root) as st:
         ids = insert(st, cfg, [spec])
         return {"added": ids, "state": st["tasks"][ids[0]]["state"], "profile": st["tasks"][ids[0]]["profile"]}
@@ -519,7 +526,7 @@ def brief(t: dict) -> dict:
 def cmd_next(a, root, cfg):
     with store(root, write=False) as st:
         picks, waiting = dispatchable(st, cfg, a.pool)
-        out = {"pool": a.pool, "dispatch": [brief(t) for t in picks], "waiting": waiting}
+        out = {"pool": a.pool, "dispatch": [{**brief(t), "design_depth": t.get("design_depth")} for t in picks], "waiting": waiting}
         if a.pool in SLOT_STATE:
             out["free_slots"] = limit(st, cfg, a.pool) - used(st, a.pool)
         if a.pool == "verify":
@@ -892,7 +899,8 @@ def cmd_recover(a, root, cfg):
 
 def cmd_cleanup(a, root, cfg):
     results = {}
-    with store(root) as st:
+    # autonomous-mods-dev 추가: --dry-run은 지울 worktree·브랜치만 보여 주고 아무것도 바꾸지 않는다
+    with store(root, write=not a.dry_run) as st:
         integ = st["integration_branch"]
         busy = {t["worktree"] for t in st["tasks"].values() if t["state"] not in ("COMPLETED", "CANCELLED")}
         for t in st["tasks"].values():
@@ -911,6 +919,11 @@ def cmd_cleanup(a, root, cfg):
                 problems.append("브랜치에 통합되지 않은 새 커밋이 있다")
             if problems:
                 results[t["id"]] = {"cleaned": False, "why": problems}
+                continue
+            if a.dry_run:
+                branches = [b for b in [t["branch"]] + t["old_branches"] if branch_head(root, b) and is_ancestor(root, b, integ)]
+                results[t["id"]] = {"cleaned": False, "would_remove": {
+                    "worktree": wt if wt and Path(wt).is_dir() else None, "branches": branches}}
                 continue
             if wt and Path(wt).is_dir():
                 git(root, "worktree", "remove", wt)
@@ -1036,7 +1049,7 @@ def snapshot(root: Path, cfg: dict, st: dict) -> dict:
         tasks.append({
             **{k: t.get(k) for k in ("id", "title", "state", "priority", "risk", "profile", "paths", "forbid", "deps",
                                      "criteria", "agent", "attempts", "branch", "worktree", "base", "head", "retries",
-                                     "reason", "notes", "created", "updated", "completed", "cleaned")},
+                                     "reason", "notes", "created", "updated", "completed", "cleaned", "design_depth")},
             "pool": pool, "runnable": runnable, "waiting": why, "decisions_open": open_decisions(st, t),
             "evidence": {"valid": len(valid_evidence(t)) if verifying else None,
                          "required": required_verifiers(cfg, t),
@@ -1192,7 +1205,8 @@ def main() -> int:
         (("--criteria",), {"required": True}), (("--paths",), {"required": True}), (("--forbid",), {"default": ""}),
         (("--deps",), {"default": ""}), (("--priority",), {"type": int, "default": 0}),
         (("--risk",), {"default": "medium"}), (("--profile",), {"default": "adaptive"}),
-        (("--needs-research",), {"action": "store_true"}), (("--preview",), {"action": "store_true"}))
+        (("--needs-research",), {"action": "store_true"}), (("--preview",), {"action": "store_true"}),
+        (("--needs-design",), {"nargs": "?", "const": "standard", "default": None, "choices": DESIGN_DEPTHS}))
     cmd("load", cmd_load, (("file",), {}))
     cmd("next", cmd_next, (("--pool",), {"required": True, "choices": ["research", "design", "preview", "approval", "implement", "verify", "merge"]}))
     cmd("start", cmd_start, ID, (("--pool",), {"required": True, "choices": list(SLOT_STATE)}),
@@ -1227,7 +1241,7 @@ def main() -> int:
     cmd("sync", cmd_sync, ID)
     cmd("status", cmd_status, (("--json",), {"action": "store_true"}), (("--brief",), {"action": "store_true"}))
     cmd("recover", cmd_recover, (("--reset-running",), {"action": "store_true"}))
-    cmd("cleanup", cmd_cleanup, (("ids",), {"nargs": "*"}))
+    cmd("cleanup", cmd_cleanup, (("ids",), {"nargs": "*"}), (("--dry-run",), {"action": "store_true"}))
     cmd("metrics", cmd_metrics)
     cmd("limit", cmd_limit, (("pool",), {}), (("n",), {"type": int}))
     cmd("notes-dir", cmd_notes_dir, ID)

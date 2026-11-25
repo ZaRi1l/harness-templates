@@ -21,7 +21,7 @@ Claude Code 하네스 템플릿 모음. 모든 템플릿이 같은 두 가지를
 고르는 법: 먼저 `solo-guarded-dev`로 시작하고, 작업을 독립 경로로 나눌 수 있을 때 `verified-parallel-dev`로 올린다.
 작업이 계속 이어지고 검증된 것부터 쌓아 가고 싶으면 `continuous-parallel-dev`를 쓴다(`main` 반영은 여전히 사람이 한다).
 조사·설계·미리보기 승인까지 맡기고 상태·병합을 프로그램으로 강제하려면 `autonomous-parallel-dev`를 쓴다(실제 세션 검증 전).
-그 진행을 Claude Code 안의 관제 화면으로 보고 결정·검토를 화면에서도 하려면 `autonomous-mods-dev`를 쓴다(Mods API early access, 2.1.331에서 검증, 실제 세션 검증 전).
+그 진행을 Claude Code 안의 관제 화면으로 보고 결정·검토를 화면에서도 하려면 `autonomous-mods-dev`를 쓴다(Mods API early access, 2.1.331에서 검증. 실제 세션에서 템플릿과 설계 문서만으로 작은 앱을 끝까지 만들어 통합하는 것을 확인했다).
 팀 템플릿 두 개는 Claude Code의 **실험 기능**(Agent Teams)에 의존한다.
 
 ```mermaid

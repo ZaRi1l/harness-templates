@@ -24,6 +24,7 @@ color: purple
    1. 설계·요구사항 문서를 찾는다(사용자가 준 경로, 없으면 `docs/`·루트의 `*.md`). 없으면 대화로 받는다.
    2. 채울 값을 정한다. 문서에 없는 것만 묻는다.
       - `CLAUDE.md`의 TODO: 프로젝트 설명, 현재 단계, 수정 금지 경로, 테스트 명령, 커밋 규칙, 도메인 검토 기준
+        (커밋 규칙에 이 세션이 받은 attribution 줄(`Co-Authored-By: …`)을 옮겨 적지 않는다. 클라이언트·모델마다 다르다)
         (테스트가 통과해도 틀릴 수 있는 이 프로젝트 고유 항목: 값의 범위·단위, 경계, 보안, 데이터 보존).
       - `.claude/hooks/verify.config.json`: 아래 표. 언어와 테스트 도구는 설계 문서를 따른다.
       - `.gitignore`: `.claude/settings.local.json`, `.claude/worktrees/`, 언어별 산출물(예: `__pycache__/`, `.no-pycache/`, `node_modules/`).
@@ -63,6 +64,11 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
 | deep | 복잡한 설계·알고리즘·보안 (`--risk high`) | 조사 → 설계 | 2 |
 
 - 사용자의 눈으로 확인해야 하는 작업(UI, 화면 흐름, 큰 설계)은 `--preview`를 붙인다. 단순 수정에는 붙이지 않는다.
+- 설계 필요성은 위험도와 따로 정한다: `--needs-design [light|standard|deep]`(값을 빼면 standard)을 붙이면 위험도가 낮아도 architect를 거친다.
+  붙일 때: 여러 작업이 쓰는 공통 인터페이스·API·스키마, 복잡한 데이터 모델, 여러 implementer가 나눠 구현하는 기능,
+  기존 구조와의 연동, 다른 작업이 기대는 공개 계약. 명확하고 독립적인 단순 수정에는 붙이지 않는다.
+  deep 프로파일은 자동으로 deep 설계다. 검증 수(verifier)는 지금처럼 프로파일·위험도로 정해진다.
+  다른 작업이 이 작업의 계약에 기대면, 설계가 끝난 뒤 그 작업을 `--deps`로 잇거나 설계 노트 경로를 지시문에 넣는다.
 - 강하게 얽힌 기능을 억지로 쪼개지 않는다. 담당 경로가 겹치면 의존 관계로 순서를 정한다.
 
 ## 루프 (빈 슬롯마다 반복)
@@ -71,7 +77,7 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
 | 할 일 | 명령 | 맡길 곳 |
 |---|---|---|
 | 조사 | `sched next --pool research` → `start ID --pool research --agent 이름` | researcher. 끝나면 `sched done ID --notes 경로` |
-| 설계 | `next --pool design` → `start … --pool design` | architect. 끝나면 `sched done ID --notes 경로` |
+| 설계 | `next --pool design` → `start … --pool design` | architect. 지시문에 `design_depth`와 이 계약에 기대는 작업을 넣는다. 끝나면 `sched done ID --notes 경로` |
 | 조사·설계만 하는 작업 닫기 | `sched done ID --close --notes 경로` | 진단처럼 구현이 필요 없으면 완료로 닫는다(BLOCKED로 쌓아 두지 않는다). 결과를 보고 구현·설계가 필요하면 작업을 새로 등록하거나 그대로 다음 단계로 보낸다 |
 | 미리보기 | `next --pool preview` → `start … --pool preview` | designer. `sched preview ID --file …`로 등록 |
 | 승인 받기 | `next --pool approval` | 사용자에게 `/autonomous preview`(또는 `sched dashboard` 경로)를 알리고 한꺼번에 묻는다. 사용자가 본 버전으로 `approve ID --version N --sha <해시 앞 12자>` / `revise ID --version N --feedback …`. 사용자가 관제 화면에서 직접 하면 기록할 것이 없다 |
@@ -84,6 +90,10 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
   verifier는 `[auto-task id=ID pool=verify attempt=<작업의 attempts>]`를 쓴다. 관제 화면은 이 줄로만 에이전트와 작업을 잇는다.
 - 구현 지시문에는 작업 ID, `sched next`가 준 담당 경로·완료 기준·노트 경로·승인된 미리보기(버전·해시)와 관련 결정의 응답을 담는다.
 - 재작업(RETRY)은 같은 implementer에게 SendMessage로 이어서 시킨다. 없으면 새 implementer가 `sched sync ID`로 이전 작업을 가져온다.
+- 다른 작업의 결과(API, 공통 모듈, 그 작업의 테스트)가 있어야 테스트가 도는 작업은 `--deps`로 잇는다.
+  계약(설계 노트·인터페이스)이 먼저 확정됐으면 병렬로 구현해도 되지만, 제출 전에 의존 작업이 통합되면 `sched sync ID`로 받아 전체 테스트를 돌린 뒤 제출하게 한다.
+- 커밋하지 않은 변경이 남아 있는데(사용자가 "정리했어"라고 한 뒤 포함) 네가 만든 것이 아니면 직접 커밋하지 않는다.
+  남은 파일 목록을 보여 주고, 커밋해도 되는지(메시지 포함) 묻는다.
 
 ## integrate 결과
 | 결과 | 처리 |
@@ -110,6 +120,8 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
    열린 결정에 묶인 작업은 프로그램이 시작·통합을 거부한다. 여러 결정은 한꺼번에 연다.
 2. `AskUserQuestion`으로 묻는다(추천을 첫 선택지로). 사용자가 관제 화면에서 고를 수도 있다.
 3. 사용자가 실제로 답한 것만 `sched decide answer D-1 --choice A [--note …]`로 기록한다. 답이 없으면 OPEN으로 둔다.
+   기록 전에 `sched status --json`으로 그 결정이 아직 OPEN인지 본다. 사용자가 관제 화면에서 먼저 답했으면(by tui) 다시 기록하지 않는다.
+   대화의 답과 화면의 답이 다르면 기록을 바꾸지 말고 사용자에게 어느 쪽인지 묻는다.
    응답을 후속 작업의 지시문에 넣는다. 방향이 바뀌면 `sched decide cancel`, 필요한 작업은 새로 등록하거나 취소한다.
 - 작업 자체가 진행할 수 없는 장애(환경·권한·재시도 한도)는 `sched block ID --reason …`, 풀리면 `sched unblock ID`.
 - 환경 문제로 보이면(테스트가 코드 밖 원인으로 실패, 도구 실행 실패 등) 사용자에게 넘기기 전에 원인을 좁힌다.
@@ -123,5 +135,6 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
   결정을 기다리는 동안에도 그 결정에 묶이지 않은 작업(다른 기능, 환경과 무관한 검증 등)은 계속 진행한다.
 
 ## 끝
-대기열이 모두 COMPLETED·BLOCKED·CANCELLED면 `sched cleanup`, `sched metrics`를 실행하고 보고한다:
+대기열이 모두 COMPLETED·BLOCKED·CANCELLED면 먼저 `sched cleanup --dry-run`으로 지울 worktree·브랜치 목록을 보고(그대로 보고에 싣는다),
+그다음 `sched cleanup`, `sched metrics`를 실행하고 보고한다. 정리가 거부되면 우회하지 말고 목록과 함께 사용자에게 맡긴다:
 작업별 결과, 통합 브랜치 최종 커밋, 보류 항목과 사유, 지표, 사용자가 할 일(`main` 반영 등).
