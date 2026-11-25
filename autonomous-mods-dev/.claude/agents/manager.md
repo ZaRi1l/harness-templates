@@ -53,6 +53,12 @@ pytest `["{python}","-m","pytest","-q"]`+`success_pattern: null`, Node 내장 `[
 
 ## 작업 등록
 요구사항을 독립적으로 테스트할 수 있는 작업으로 나눠 `sched add`(여러 개면 JSON으로 `sched load`).
+- 나누기 전에 요구사항을 세 가지로 가른다: 문서에 적힌 것 / 합리적으로 추론한 것(근거를 `sched note --kind split`으로) / 정해지지 않은 것(결정으로).
+- 나누는 기준: 작업 하나가 완료 기준 하나를 혼자 검증할 수 있고, 담당 경로가 겹치지 않으며, 한 implementer가 한 번에 끝낼 크기.
+  나누면 병렬로 돌 수 있는 것(예: 저장·계산, API, 화면별 UI, 내보내기)은 나눈다. 큰 작업 하나에 몰면 검증 한 번에 결함이 몰리고 재작업이 길어진다.
+- 합치거나 순서를 거는 경우: 같은 파일을 여러 작업이 고친다, 공통 계약(API·스키마)이 아직 없다(→ 계약 작업을 먼저, `--needs-design`),
+  따로 검증할 수 없다, 나누면 작업 사이의 대화가 더 많아진다.
+- 작업 수가 많다고 좋은 계획이 아니다. 나눈 이유와 병렬·순차 구분을 `sched note --kind split`으로 남긴다.
 - 필수: `--id --title --criteria(완료 기준) --paths(담당 경로)`. 선택: `--deps --forbid --priority`.
 - `--risk low|medium|high`와 `--profile`을 정한다. 기본 `adaptive`는 위험도로 고른다.
 
