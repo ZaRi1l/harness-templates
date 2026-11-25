@@ -202,7 +202,7 @@ type Calls = { argv: string[][]; live: { snap: Snapshot | string; mtime: number 
 // 엔진은 realPath를 실행 중인 OS의 표기로 돌려준다(Windows면 D:\repo\...). 비교할 때는 / 로 맞춘다.
 const slash = (a: string[] | undefined) => a?.map(x => x.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
 
-const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean; sysname?: string; noPathExplorer?: boolean } = {}): Calls => {
+const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean; sysname?: string; noPathExplorer?: boolean; teammateOnly?: boolean } = {}): Calls => {
   const calls: Calls = { argv: [], live: { snap, mtime: 1 }, clock: mock.clock(on) }
   on('command.register', () => ({ value: { command: 'autonomous' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -227,7 +227,7 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
   })
   on('fs.read', () => ({ value: typeof calls.live.snap === 'string' ? calls.live.snap : JSON.stringify(calls.live.snap) }))
   let spawned = 0
-  on('agent.spawn', () => ({ model: 'sonnet', agentId: `ag-${++spawned}` }))
+  on('agent.spawn', () => (opts.teammateOnly ? { model: 'sonnet', teammateId: `mate-${++spawned}@team` } : { model: 'sonnet', agentId: `ag-${++spawned}` }))
   return calls
 }
 
@@ -471,4 +471,40 @@ test('목록에 없는 에이전트(예: 격리 worktree 실행)를 끝난 것�
   expect(await ui.find({ type: 'Text', text: /실행 미확인/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /implementer · / })).toBeDefined()
   await ui.unmount()
+})
+
+test('일을 마친 뒤(idle) 목록에서 사라진 팀원은 끝난 것으로 본다', async () => {
+  const runs = [run({ agentId: 'mate', status: 'idle', endedMs: 10 }), run({ agentId: 'busy' })]
+  const next = C.applyAgentList(runs, [], 50)
+  expect(next.map(r => `${r.agentId}:${r.status}`)).toEqual(['mate:completed', 'busy:running'])
+  expect(next[0]?.endedMs).toBe(10)
+})
+
+test('같은 marker로 띄운 verifier 두 개가 모두 그려진다', async ($, on) => {
+  engine(on)
+  await start($)
+  await spawn($, '[auto-task id=API pool=verify attempt=1]\n정확성 검증', 'verifier', '정확성 검증')
+  await spawn($, '[auto-task id=API pool=verify attempt=1]\n보안 검증', 'verifier', '보안 검증')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-agents' })
+  const heads = await ui.findAll({ type: 'Text', text: /verifier\s+API 검증 #1/ })
+  expect(heads.length).toBe(2)
+  await ui.unmount()
+})
+
+test('agentId 없이 팀원 주소만 돌려주는 실행도 기록한다', async ($, on) => {
+  engine(on, SNAP, { teammateOnly: true })
+  await start($)
+  await spawn($, '[auto-task id=API pool=verify attempt=1]\n보안 검증', 'verifier', '보안 검증')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-agents' })
+  expect(await ui.find({ type: 'Text', text: /verifier\s+API 검증 #1/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('대기열: 펼친 작업에 설계 깊이와 노트를 보인다', async () => {
+  const snap = { ...SNAP, tasks: SNAP.tasks.map(t => (t.id === 'API' ? { ...t, design_depth: 'standard', notes: ['notes/API/design.md'] } : t)) }
+  const lines = C.queueLines(snap, 'all', 'API', 120).map(r => r.line.map(s => s.text).join(''))
+  expect(lines.some(l => l.includes('설계 standard · 노트 notes/API/design.md'))).toBe(true)
+  expect(C.queueLines(SNAP, 'all', 'API', 120).some(r => r.line.map(s => s.text).join('').includes('설계 '))).toBe(false)
 })

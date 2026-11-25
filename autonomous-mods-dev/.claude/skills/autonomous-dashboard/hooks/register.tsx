@@ -322,8 +322,10 @@ export const register: Register = (on, options) => {
     const started = await next(e)
     try {
       ensureTimer($)
-      if (started.deny === undefined && started.agentId) {
-        const id = started.agentId
+      // agentId가 없으면 팀원 주소로 대신 잇는다(자기 터미널 Pane에서 도는 팀원은 주소가 곧 id다)
+      const id = started.deny === undefined ? (started.agentId ?? started.teammateId) : undefined
+      if (started.deny === undefined && !id) log('warn', 'mod', null, `${e.subagentType} 시작을 기록하지 못했다: 엔진이 에이전트 id를 주지 않았다`, await $.clock.now())
+      if (id) {
         const now = await $.clock.now()
         const mk = C.parseMarker(e.prompt)
         const runs = await read($, runsA)
@@ -339,8 +341,9 @@ export const register: Register = (on, options) => {
         log('info', 'agent', run.task, `${run.role} ${known ? '재개' : '시작'}${mk ? ` (${mk.pool} #${mk.attempt})` : ' · 미연결'}`, now)
         await flush($)
       }
-    } catch {
-      // 관찰 실패가 에이전트 실행을 막으면 안 된다
+    } catch (err) {
+      // 관찰 실패가 에이전트 실행을 막으면 안 된다. 원인은 활동 탭에 남긴다
+      log('error', 'mod', null, `에이전트 시작 기록 실패: ${err instanceof Error ? err.message : String(err)}`, Date.now())
     }
     return started
   }).catch(($, e, next) => next(e))

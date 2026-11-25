@@ -442,7 +442,9 @@ export const applyAgentList = (runs: Run[], agents: readonly AgentSeen[], now: n
   return runs.map(r => {
     if (r.status !== 'running' && r.status !== 'idle') return r
     const a = byId.get(r.agentId)
-    if (!a) return r // 목록에 없다고 끝난 것으로 보지 않는다(격리 실행 등은 목록에 안 보일 수 있다). 끝은 agent.report로 안다
+    // 실행 중인데 목록에 없으면 그대로 둔다(격리 실행 등은 목록에 안 보일 수 있다. 끝은 agent.report로 안다).
+    // 일을 마치고 기다리던 팀원이 목록에서 사라졌으면 끝난 것이다
+    if (!a) return r.status === 'idle' ? { ...r, status: 'completed', endedMs: r.endedMs ?? now } : r
     const tokens = typeof a.tokenCount === 'number' ? a.tokenCount : r.tokens
     const end = a.status === 'completed' || a.taskStatus === 'completed' ? 'completed'
       : a.status === 'failed' || a.taskStatus === 'failed' ? 'failed'
@@ -705,6 +707,7 @@ export const queueLines = (snap: Snapshot, filter: QueueFilter, expanded: string
       push(kv('    담당', t.paths.join(', ')))
       if (t.forbid.length) push(kv('    금지', t.forbid.join(', ')))
       push(kv('    완료 기준', t.criteria))
+      if (t.design_depth) push(kv('    설계', `${t.design_depth}${t.notes?.length ? ` · 노트 ${t.notes[t.notes.length - 1]}` : ''}`))
       push(kv('    배정', `${t.agent ?? '-'} · 시도 ${t.attempts ?? 0}`))
       if (t.reason) push(kv('    사유', t.reason))
     }

@@ -29,6 +29,10 @@ export type SnapTask = {
   updated: string
   completed: string | null
   cleaned: boolean | null
+  /** 설계 깊이(light|standard|deep). 설계가 필요 없으면 null, 옛 스냅샷에는 없다 */
+  design_depth?: string | null
+  /** 조사·설계 노트 경로(sched done --notes) */
+  notes?: string[]
   pool: string | null
   runnable: boolean
   waiting: string | null
