@@ -164,7 +164,7 @@ manager가 중요한 선택을 만나면 결정을 열고(`sched decide add`, �
 에이전트가 개발하며 남기는 문서는 저장소의 `docs/ai-harness/`에 두고 커밋한다. 세션이 바뀌어도 남고, implementer는 `sched sync`로 자기 worktree에서 읽는다.
 | 폴더 | 쓰는 쪽 | 내용 |
 |---|---|---|
-| `requirements/` | manager | 대화로 의논해 정한 요구(보여 주고 확인받은 것) |
+| `requirements/` | manager | 요구 분석: 출처, 적힌 것 → 작업, 추론과 근거, 미정 → 결정. 문서로 받은 요구는 원본을 가리키고(원본이 기준), 대화로 정한 요구는 이 문서가 원본이라 보여 주고 확인받는다 |
 | `research/` | researcher | 조사·진단 결과 |
 | `design/` | architect | 설계·계약. implementer가 따르고 verifier가 검사한다 |
 | `reports/` | manager | 끝 보고(결과, 결정, 남은 위험, 사용자가 할 일) |

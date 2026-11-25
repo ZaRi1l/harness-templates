@@ -35,7 +35,7 @@
 ## AI 문서 (`docs/ai-harness/`, 커밋한다)
 | 폴더 | 쓰는 쪽 | 내용 |
 |---|---|---|
-| `requirements/` | manager | 사용자와 의논해 정한 요구(확인받은 것) |
+| `requirements/` | manager | 요구 분석: 출처(문서·대화), 적힌 것 → 작업, 추론과 근거, 미정 → 결정. 문서로 받은 요구는 복사하지 않고 가리킨다 |
 | `research/` | researcher | 조사·진단 결과 |
 | `design/` | architect | 설계·계약(implementer가 따르고 verifier가 검사) |
 | `reports/` | manager | 끝 보고: 결과, 결정, 남은 위험, 사용자가 할 일 |
