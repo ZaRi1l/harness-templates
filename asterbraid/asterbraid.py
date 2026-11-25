@@ -157,7 +157,8 @@ def apply(target: Path, acts: list, lock: dict) -> None:
             dst.write_bytes((TEMPLATE / rel).read_bytes())
         elif kind == "write":
             dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_text(act[3], encoding="utf-8", newline="")
+            with dst.open("w", encoding="utf-8", newline="") as fh:  # 줄바꿈을 그대로 둔다(Path.write_text의 newline은 3.10부터)
+                fh.write(act[3])
         elif kind == "remove":
             dst.unlink()
     (target / LOCK).write_text(json.dumps(lock, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
