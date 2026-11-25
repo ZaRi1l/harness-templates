@@ -9,7 +9,7 @@ description: asterbraid의 시작 준비(처음 한 번). 사용자가 asterbrai
 0. `git rev-parse --show-toplevel`. 실패하면(git 저장소가 아니면) 현재 폴더에서 `git init -b main`.
    결과가 현재 폴더와 다르면(다른 저장소의 하위 폴더) 그 저장소를 쓸지, 여기서 새로 `git init`할지 묻는다.
    `sched status`가 Hook 경고를 내거나 `.claude/asterbraid.lock.json`이 없으면 `.claude/settings.json`을 직접 고치지 않는다(권한 분류기가 막는다).
-   사용자에게 `uv run --no-project python <템플릿>/asterbraid/asterbraid.py install <이 폴더> --apply`(설치됐으면 `update`)와 세션 재시작을 안내하고 멈춘다.
+   사용자에게 `uv run --no-project python <템플릿>/asterbraid/asterbraid.py install <이 폴더>`(설치됐으면 `update`)와 세션 재시작을 안내하고 멈춘다.
    기존 프로젝트(코드·커밋 이력이 있다)는 아래 2~4에서 기존 파일 내용을 지우지 않는다.
 1. 설계·요구사항 문서를 찾는다(사용자가 준 경로, 없으면 `docs/`·루트의 `*.md`). 없으면 README·코드·대화로 받는다.
    기존 프로젝트면 코드에서 언어·테스트 도구·디렉터리 구조를 읽어 채우고, 도메인 검토 기준이 비면 묻는다.

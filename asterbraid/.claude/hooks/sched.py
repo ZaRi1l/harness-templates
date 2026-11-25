@@ -923,7 +923,7 @@ def settings_warnings(root: Path) -> list:
     if "verify.py" in text and "sched.py" in text:
         return []
     return ["하네스 Hook이 .claude/settings.json에 없다(검증 Hook·push 거부 없이 돈다). 직접 고치지 말고 "
-            "사용자에게 `asterbraid.py check <프로젝트>`와 `update --apply`를 안내한다"]
+            "사용자에게 `asterbraid.py check <프로젝트>`와 `update`를 안내한다"]
 
 
 def cmd_recover(a, root, cfg):

@@ -650,7 +650,8 @@ class TestInstaller(unittest.TestCase):
 
     def run_tool(self, *args, template=None):
         script = (template or self.TEMPLATE) / "asterbraid.py"
-        return subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, encoding="utf-8")
+        return subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, encoding="utf-8",
+                              stdin=subprocess.DEVNULL)  # 터미널이 아니면 묻지 않는다
 
     def ok(self, *args, **kw):
         r = self.run_tool(*args, **kw)
@@ -662,9 +663,10 @@ class TestInstaller(unittest.TestCase):
 
     def test_fresh_install_dry_run_then_apply_then_check(self):
         plan = self.ok("install", str(self.target))
-        self.assertIn("--apply", plan)
+        self.assertIn("--yes", plan)  # 물을 수 없으면 보여 주기만 하고 방법을 알린다
+        self.assertNotIn("적용할까", plan)
         self.assertEqual(list(self.target.iterdir()), [])  # 미리보기만
-        self.assertIn("세션을 다시", self.ok("install", str(self.target), "--apply"))
+        self.assertIn("세션을 다시", self.ok("install", str(self.target), "--yes"))
         for rel in (".claude/agents/manager.md", ".claude/hooks/sched.py", ".claude/asterbraid.md",
                     ".claude/skills/asterbraid-dashboard/.claude-plugin/plugin.json", ".claude/hooks/verify.config.json",
                     "CLAUDE.md", ".claude/asterbraid.lock.json"):

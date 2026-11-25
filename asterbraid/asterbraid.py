@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """AsterBraid 설치·업데이트·점검 (표준 라이브러리만, 사용자가 직접 실행한다).
 
-  uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더> [--apply]
-  uv run --no-project python asterbraid/asterbraid.py update  <프로젝트 폴더> [--apply]
+  uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더> [--yes]
+  uv run --no-project python asterbraid/asterbraid.py update  <프로젝트 폴더> [--yes]
   uv run --no-project python asterbraid/asterbraid.py check   <프로젝트 폴더>
 
---apply 없이는 바꿀 내용만 보여 준다. 하네스 파일(agents·hooks·skills·.claude/asterbraid.md)은 복사하고,
+바꿀 내용을 보여 주고, 터미널이면 적용할지 묻는다(입력을 받을 수 없으면 보여 주기만 한다). --yes(--apply)는 묻지 않고 적용한다. 하네스 파일(agents·hooks·skills·.claude/asterbraid.md)은 복사하고,
 프로젝트 파일은 합친다: settings.json(기존 값 유지, 하네스 권한·Hook만 추가), .gitignore(빠진 줄만),
 CLAUDE.md(없으면 템플릿, 있으면 끝에 `@.claude/asterbraid.md` 한 줄). 같은 이름의 다른 파일은 덮지 않는다.
 설치한 파일의 해시를 .claude/asterbraid.lock.json에 남겨, update는 사용자가 고치지 않은 하네스 파일만 바꾼다.
@@ -194,7 +194,7 @@ def check(target: Path) -> int:
         bad.append(f"CLAUDE.md에 `{IMPORT}`가 없다")
     for line in bad:
         print(f"✗ {line}")
-    print("✓ 하네스 설치 상태 정상" if not bad else f"문제 {len(bad)}개. update --apply로 고치거나 직접 합친다")
+    print("✓ 하네스 설치 상태 정상" if not bad else f"문제 {len(bad)}개. update로 고치거나 직접 합친다")
     return 1 if bad else 0
 
 
@@ -205,7 +205,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mode", choices=["install", "update", "check"])
     ap.add_argument("target")
-    ap.add_argument("--apply", action="store_true", help="실제로 적용한다(없으면 미리보기)")
+    ap.add_argument("--yes", "-y", "--apply", dest="apply", action="store_true", help="묻지 않고 적용한다")
     a = ap.parse_args()
     target = Path(a.target).resolve()
     try:
@@ -228,8 +228,17 @@ def main() -> int:
     if not acts:
         print("바꿀 것이 없다")
     if not a.apply:
-        print("\n미리보기다. 적용하려면 같은 명령에 --apply를 붙인다")
-        return 0
+        # Claude 등이 대신 실행하면 물을 수 없다. 보여 주기만 한다(Windows는 NUL 입력도 tty라 출력까지 본다)
+        if not (sys.stdin and sys.stdin.isatty() and sys.stdout.isatty()):
+            print("\n미리보기다. 적용하려면 같은 명령에 --yes를 붙인다(터미널에서 직접 실행하면 여기서 묻는다)")
+            return 0
+        try:
+            answer = input("\n적용할까? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes", "ㅛ"):
+            print("적용하지 않았다")
+            return 0
     apply(target, acts, lock)
     print("\n적용했다. 다음: Claude 세션을 다시 열고(새 Hook·에이전트·Mod를 읽는다) `claude --agent manager`로 시작한다")
     return 0

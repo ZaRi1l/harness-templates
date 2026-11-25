@@ -83,19 +83,18 @@ Mod를 `.claude/mods/`가 아니라 `.claude/skills/`에 두는 것은 Claude Co
 
 ## 사용법
 `asterbraid.py`는 템플릿에 두고, 설치할 프로젝트 폴더를 가리켜 실행한다(`uv` 대신 `python`도 된다).
-`--apply` 없이는 바꿀 내용만 보여 준다. 상대 경로는 명령을 실행한 폴더 기준이다.
+바꿀 내용을 보여 주고 적용할지 묻는다(`y`). 묻지 않고 적용하려면 `--yes`. 상대 경로는 명령을 실행한 폴더 기준이다.
 ```
 # 템플릿 저장소에서 실행 (프로젝트 폴더를 가리킨다)
 cd <템플릿 위치>
-uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더>          # 미리보기
-uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더> --apply  # 적용
+uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더>          # 바꿀 내용을 보이고 적용할지 묻는다
 
 # 프로젝트 폴더에서 실행 (현재 폴더 = .)
 cd <프로젝트 폴더>
-uv run --no-project python <템플릿 위치>/asterbraid/asterbraid.py install . --apply
+uv run --no-project python <템플릿 위치>/asterbraid/asterbraid.py install .
 
 # 그 밖의 명령 (위 두 방법 모두 같다)
-… asterbraid.py update <프로젝트 폴더> --apply   # 템플릿 새 버전 반영(직접 고친 파일은 남긴다)
+… asterbraid.py update <프로젝트 폴더>   # 템플릿 새 버전 반영(직접 고친 파일은 남긴다)
 … asterbraid.py check  <프로젝트 폴더>           # 설치 상태 점검
 ```
 - 하네스 파일(agents·hooks·skills·`.claude/asterbraid.md`)은 복사한다. 같은 이름의 다른 파일이 있으면 덮지 않고 알린다.

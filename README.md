@@ -42,7 +42,7 @@ flowchart TD
 각 템플릿의 자세한 흐름도는 그 폴더의 README "흐름" 절에 있다.
 
 ## 공통 적용 방법
-1. 고른 템플릿의 `CLAUDE.md`와 `.claude/`를 프로젝트 루트(git 저장소)에 복사한다. 기존 파일이 있으면 합친다. `asterbraid`는 `uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더> --apply`가 복사·합치기를 한다.
+1. 고른 템플릿의 `CLAUDE.md`와 `.claude/`를 프로젝트 루트(git 저장소)에 복사한다. 기존 파일이 있으면 합친다. `asterbraid`는 `uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더>`가 복사·합치기를 한다.
 2. `CLAUDE.md`의 TODO를 채우고 `.claude/hooks/verify.config.json`을 프로젝트 테스트 명령에 맞춘다.
 3. `.gitignore`에 `.claude/settings.local.json`(worktree를 쓰면 `.claude/worktrees/`도)을 넣는다.
 4. 한 번 수동 실행: `python .claude/hooks/verify.py --target . --force`
