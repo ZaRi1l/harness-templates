@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -225,7 +226,7 @@ class TestCleanupDryRun(ModsCase):
         self.assertEqual(self.integrate("A")[:2], (0, "MERGED"))
         plan = self.ok("cleanup", "--dry-run")
         self.assertEqual(plan["A"]["cleaned"], False)
-        self.assertEqual(Path(plan["A"]["would_remove"]["worktree"]), wa)
+        self.assertTrue(os.path.samefile(plan["A"]["would_remove"]["worktree"], wa))  # Windows 짧은 이름(RUNNER~1)과 긴 이름을 같게 본다
         self.assertIn("task-A", plan["A"]["would_remove"]["branches"])
         self.assertTrue(wa.is_dir())  # 아무것도 지우지 않는다
         self.assertNotEqual(self.repo.git("branch", "--list", "task-A"), "")
