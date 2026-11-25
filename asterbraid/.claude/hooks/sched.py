@@ -18,6 +18,9 @@
                                사용자의 승인 / 수정 요청을 기록한다(버전·해시가 사용자가 본 것과 같아야 한다)
   dashboard                    미리보기와 전체 작업 현황을 한 HTML로 만든다
   decide add|answer|cancel     사용자 의사결정 기록. 열린 결정에 묶인 작업만 시작·통합을 멈춘다
+  decide adopt ID              (자리 비움 중) 위임된 종류의 결정을 추천안으로 정한다(by away)
+  away [--previews] / back     사용자 자리 비움 켜기(--previews: 미리보기 최신 버전 approve --by away 허용) / 복귀
+  away-review KEY --keep|--redo   자리 비운 동안 정한 것 확인: 그대로 둠 / 같은 선택지로 결정을 다시 연다
   pause [--reason] / resume    새 배정만 멈춘다 / 다시 시작한다(실행 중인 에이전트는 그대로)
   priority ID N / note --kind K --text T   우선순위 변경 / manager 설명 기록
   snapshot                     스냅샷(dashboard.json)을 다시 만든다
@@ -92,6 +95,8 @@ DESIGN_DEPTHS = ("light", "standard", "deep")  # asterbraid 추가: 설계 필�
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")  # 경로(previews/<ID>)와 marker에 그대로 쓴다
 DECISION_KINDS = ("ui", "ux", "architecture", "data", "breaking", "dependency", "requirements", "direction",
                   "environment", "limit", "other")
+# asterbraid 추가(4-5): 자리 비움 중 추천안으로 정해도 되는 결정 종류. 의존성·호환 깨짐·환경·데이터·한도는 사람이 정한다
+ADOPTABLE_KINDS = ("ui", "ux", "direction", "architecture", "requirements")
 NOTE_KINDS = ("strategy", "priority", "decision", "tech", "alternative", "split", "risk", "resolved", "milestone",
               "blocker", "plan")
 SNAPSHOT_SCHEMA = 1
@@ -214,7 +219,7 @@ def store(root: Path, write: bool = True):
         path = d / "state.json"
         st = json.loads(path.read_text(encoding="utf-8")) if path.exists() else \
             {"version": 1, "integration_branch": None, "limits": {}, "tasks": {}}
-        for key, default in (("paused", None), ("decisions", {}), ("notes_log", [])):
+        for key, default in (("paused", None), ("decisions", {}), ("notes_log", []), ("away", None), ("away_log", [])):
             st.setdefault(key, default)
         yield st
         if write:
@@ -643,6 +648,11 @@ def cmd_preview(a, root, cfg):
 def cmd_approve(a, root, cfg):
     with store(root) as st:
         t = get(st, a.id)
+        if a.by == "away":  # asterbraid 추가(4-5): 사용자가 미리보기까지 위임했을 때만 추천안(최신 버전)을 승인한다
+            if not st["away"]:
+                raise Refused("자리 비움 중이 아니다. by away 승인은 사용자가 자리 비움을 켰을 때만 한다")
+            if not st["away"].get("previews"):
+                raise Refused("미리보기 자동 승인은 위임받지 않았다(sched away --previews). 사용자 승인을 기다린다")
         if t["state"] != "AWAITING_APPROVAL":
             raise Refused(f"{t['id']}는 승인 대기 중이 아니다({t['state']})")
         versions = [v["n"] for v in t["preview"]["versions"]]
@@ -668,6 +678,8 @@ def cmd_approve(a, root, cfg):
         t["preview"]["approval"] = {"version": n, "sha256": v["sha256"], "at": now(), "by": a.by,
                                     "criteria_sha": hashlib.sha256(t["criteria"].encode("utf-8")).hexdigest()[:16]}
         transition(t, "READY", f"미리보기 v{n} 승인({a.by})")
+        if a.by == "away":
+            log_away(st, "preview", t["id"], f"{t['title']} 미리보기 v{n} 자동 승인", version=n)
         return brief(t)
 
 
@@ -875,7 +887,7 @@ def cmd_status(a, root, cfg):
         open_dec = sorted(d["id"] for d in st["decisions"].values() if d["state"] == "OPEN")
         out = {"integration_branch": st["integration_branch"], "counts": counts, "slots": slots,
                "ready_now": [t["id"] for t in ready], "paused": st["paused"], "decisions_open": open_dec,
-               "anomalies": warn}
+               "anomalies": warn, "warnings": settings_warnings(root)}
         if a.json:
             out["tasks"] = tasks
             return out
@@ -890,11 +902,28 @@ def cmd_status(a, root, cfg):
             print(f"지금 시작할 수 있는 구현 작업: {out['ready_now']}")
         if st["paused"]:
             print(f"새 배정 일시 중지: {st['paused'].get('reason') or '사유 없음'} (sched resume)")
+        if st["away"]:
+            print(f"사용자 자리 비움 중(미리보기 자동 승인 {'예' if st['away'].get('previews') else '아니오'}): "
+                  f"{', '.join(ADOPTABLE_KINDS)} 결정은 decide adopt로 추천안 채택")
         if open_dec:
             print(f"사용자 결정 대기: {open_dec}")
         for w in warn:
             print(f"경고: {w['text']}. 원인을 확인한다(에이전트 상태, 같은 오류 반복, 환경)")
+        for w in out["warnings"]:
+            print(f"경고: {w}")
         return None
+
+
+def settings_warnings(root: Path) -> list:
+    """asterbraid 추가(e2e4 N1): 하네스 Hook이 빠진 채 돌지 않게 알린다. 설정은 사용자가 고친다."""
+    try:
+        text = (root / ".claude" / "settings.json").read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    if "verify.py" in text and "sched.py" in text:
+        return []
+    return ["하네스 Hook이 .claude/settings.json에 없다(검증 Hook·push 거부 없이 돈다). 직접 고치지 말고 "
+            "사용자에게 `asterbraid.py check <프로젝트>`와 `update --apply`를 안내한다"]
 
 
 def cmd_recover(a, root, cfg):
@@ -940,6 +969,14 @@ def cmd_cleanup(a, root, cfg):
             if (a.ids and t["id"] not in a.ids) or t["state"] != "COMPLETED" or t["cleaned"]:
                 continue
             wt, problems = t["worktree"], []
+            if not t["head"] and not t["branch"] and not t["old_branches"] and not wt:
+                # asterbraid 추가(e2e4): 조사·설계만 하고 닫은 작업은 지울 것이 없다. 커밋 검사로 멈추지 않는다
+                if a.dry_run:
+                    results[t["id"]] = {"cleaned": False, "would_remove": {"worktree": None, "branches": []}}
+                else:
+                    t["cleaned"] = True
+                    results[t["id"]] = {"cleaned": True}
+                continue
             if not is_ancestor(root, t["head"], integ):
                 problems.append("작업 커밋이 통합 브랜치에 없다")
             if t["branch"] in cfg["protected_branches"] or t["branch"] == integ:
@@ -1084,6 +1121,7 @@ def snapshot(root: Path, cfg: dict, st: dict) -> dict:
                                      "criteria", "agent", "attempts", "branch", "worktree", "base", "head", "retries",
                                      "reason", "notes", "created", "updated", "completed", "cleaned", "design_depth")},
             "pool": pool, "runnable": runnable, "waiting": why, "decisions_open": open_decisions(st, t),
+            "started": next((h["at"] for h in t["history"] if h.get("pool")), None),  # 첫 배정(걸린 시간 계산용)
             "evidence": {"valid": len(valid_evidence(t)) if verifying else None,
                          "required": required_verifiers(cfg, t),
                          "items": [{k: e.get(k) for k in ("at", "verifier", "verdict", "sha", "scope", "notes")}
@@ -1097,7 +1135,8 @@ def snapshot(root: Path, cfg: dict, st: dict) -> dict:
         "generated_at": now(), "generated_ms": int(time.time() * 1000),
         "project": {"root": str(root), "name": root.name, "state_dir": str(d)},
         "integration": {"branch": integ, "head": head},
-        "paused": st.get("paused"), "total": len(tasks), "completed": counts.get("COMPLETED", 0), "counts": counts,
+        "paused": st.get("paused"), "away": st.get("away"), "away_log": st.get("away_log", [])[-30:],
+        "total": len(tasks), "completed": counts.get("COMPLETED", 0), "counts": counts,
         "slots": {**{p: {"used": used(st, p), "limit": limit(st, cfg, p)} for p in SLOT_STATE},
                   "verify": {"queued": counts.get("VERIFYING", 0), "limit": limit(st, cfg, "verify")}},
         "tasks": tasks,
@@ -1166,13 +1205,72 @@ def cmd_decide(a, root, cfg):
             raise Refused(f"결정이 없다: {a.id}")
         if d["state"] != "OPEN":
             raise Refused(f"{a.id}는 OPEN이 아니다({d['state']}). 이미 응답·취소된 결정은 바꾸지 않는다. 새 결정을 연다")
-        if a.action == "answer":
+        if a.action == "adopt":  # asterbraid 추가(4-5): 자리 비움 중 추천안 채택
+            if not st["away"]:
+                raise Refused("자리 비움 중이 아니다. 사용자가 답할 때까지 기다린다")
+            if d["kind"] not in ADOPTABLE_KINDS:
+                raise Refused(f"{d['kind']} 결정은 위임 범위가 아니다(위임: {', '.join(ADOPTABLE_KINDS)}). 사용자가 돌아오면 묻는다")
+            if not d["recommend"]:
+                raise Refused("추천안이 없는 결정은 채택할 수 없다. 사용자가 돌아오면 묻는다")
+            d.update(state="ANSWERED", choice=d["recommend"], note="자리 비움 중 추천안 채택", by="away", answered_at=now())
+            label = next(o["label"] for o in d["options"] if o["key"] == d["recommend"])
+            log_away(st, "decision", d["id"], f"{d['title']}: {d['recommend']} ({label})", choice=d["recommend"])
+        elif a.action == "answer":
+            if a.by == "away":
+                raise Refused("자리 비움 중 결정은 decide adopt로 한다(추천안·위임 범위를 확인한다)")
             if a.choice not in [o["key"] for o in d["options"]]:
                 raise Refused(f"선택지에 없다: {a.choice}. 선택지: {[o['key'] for o in d['options']]}")
             d.update(state="ANSWERED", choice=a.choice, note=a.note or None, by=a.by, answered_at=now())
         else:
             d.update(state="CANCELLED", reason=a.reason or "", answered_at=now())
         return d
+
+
+def log_away(st: dict, kind: str, key: str, text: str, **fields) -> None:
+    st["away_log"] = (st["away_log"] + [{"at": now(), "kind": kind, "key": key, "text": text, "reviewed": None,
+                                         **fields}])[-NOTES_KEPT:]
+
+
+def cmd_away(a, root, cfg):
+    with store(root) as st:
+        st["away"] = {"at": now(), "previews": a.previews, "reason": a.reason}
+        return {"away": st["away"], "adoptable": list(ADOPTABLE_KINDS)}
+
+
+def cmd_back(a, root, cfg):
+    with store(root) as st:
+        st["away"] = None
+        return {"away": None, "auto": [x for x in st["away_log"] if x["reviewed"] is None]}
+
+
+def cmd_away_review(a, root, cfg):
+    """자리 비운 동안 정한 것을 사용자가 확인한다: --keep 그대로 둠, --redo 결정을 같은 선택지로 다시 연다."""
+    with store(root) as st:
+        entries = [x for x in st["away_log"] if x["key"] == a.key]
+        if not entries:
+            raise Refused(f"자리 비움 기록에 없다: {a.key}")
+        entry = next((x for x in reversed(entries) if x["reviewed"] is None), None)
+        if entry is None:
+            raise Refused(f"{a.key}는 이미 확인했다({entries[-1]['reviewed']})")
+        if a.keep:
+            entry["reviewed"] = "keep"
+            return entry
+        if entry["kind"] != "decision":
+            raise Refused("미리보기는 다시 정하기를 지원하지 않는다. 바꾸려면 manager에게 수정을 요청한다")
+        old = st["decisions"][a.key]
+        n = 1
+        while f"{a.key}-r{n}" in st["decisions"]:
+            n += 1
+        new_id = f"{a.key}-r{n}"
+        live = [x for x in old["tasks"] if st["tasks"].get(x, {}).get("state") not in ("COMPLETED", "CANCELLED")]
+        st["decisions"][new_id] = {
+            **{k: old[k] for k in ("title", "question", "kind", "options", "recommend", "evidence")},
+            "id": new_id, "tasks": live, "why": f"자리 비운 동안 {old['choice']}로 정했다. 사용자가 다시 정한다",
+            "state": "OPEN", "created": now(), "choice": None, "note": None, "by": None, "answered_at": None,
+            "redo_of": a.key}
+        entry["reviewed"] = f"redo:{new_id}"
+        return {"reopened": new_id, "tasks": live,
+                "done_tasks": [x for x in old["tasks"] if x not in live]}  # 이미 끝난 작업은 manager가 후속 작업으로 고친다
 
 
 def cmd_pause(a, root, cfg):
@@ -1252,7 +1350,7 @@ def main() -> int:
         BY)
     cmd("dashboard", cmd_dashboard)
     cmd("snapshot", cmd_snapshot)
-    cmd("decide", cmd_decide, (("action",), {"choices": ["add", "answer", "cancel"]}),
+    cmd("decide", cmd_decide, (("action",), {"choices": ["add", "answer", "adopt", "cancel"]}),
         (("id",), {"nargs": "?", "default": ""}), (("--id",), {"dest": "id_opt", "default": ""}),
         (("--title",), {"default": ""}), (("--question",), {"default": ""}), (("--kind",), {"default": "other"}),
         (("--tasks",), {"default": ""}), (("--option",), {"action": "append"}), (("--pros",), {"action": "append"}),
@@ -1260,6 +1358,10 @@ def main() -> int:
         (("--evidence",), {"default": ""}), (("--choice",), {"default": ""}), (("--note",), {"default": ""}), REASON, BY)
     cmd("pause", cmd_pause, REASON)
     cmd("resume", cmd_resume)
+    cmd("away", cmd_away, (("--previews",), {"action": "store_true"}), REASON)
+    cmd("back", cmd_back)
+    cmd("away-review", cmd_away_review, (("key",), {}), (("--keep",), {"action": "store_true"}),
+        (("--redo",), {"action": "store_true"}))
     cmd("priority", cmd_priority, ID, (("n",), {"type": int}))
     cmd("note", cmd_note, (("--kind",), {"required": True}), (("--text",), {"required": True}),
         (("--task",), {"default": ""}))

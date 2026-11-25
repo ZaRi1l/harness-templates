@@ -30,7 +30,7 @@
       "title": "Refresh seconds",
       "description": "스냅샷 파일이 바뀌었는지 확인하는 간격(1~30초). 바뀌었을 때만 읽는다",
       "type": "number",
-      "default": 2
+      "default": 1
     },
     "allowActions": {
       "title": "Allow actions",

@@ -213,6 +213,12 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
   on('ui.close', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
+  const mem = new Map<string, unknown>() // $.store 흉내(세션 너머 값)
+  on('store.get', (_, e) => ({ value: mem.get(e.key) }))
+  on('store.set', (_, e) => {
+    mem.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
   on('process.run', (_, e) => {
     calls.argv.push([...e.argv])
     if (opts.gitFails && e.argv[0] === 'git') throw new Error('spawn git ENOENT')
@@ -291,7 +297,7 @@ test('marker가 있는 에이전트만 작업에 연결한다', async ($, on) =>
   await spawn($, '아무 지시', 'Explore', '탐색')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
-  expect(await ui.find({ type: 'Text', text: /API 구현 #1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /API 구현 ·/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /미연결/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /실행이 관측되지 않은/ })).toBeUndefined()
   await ui.unmount()
@@ -487,7 +493,7 @@ test('같은 marker로 띄운 verifier 두 개가 모두 그려진다', async ($
   await spawn($, '[auto-task id=API pool=verify attempt=1]\n보안 검증', 'verifier', '보안 검증')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
-  const heads = await ui.findAll({ type: 'Text', text: /verifier\s+API 검증 #1/ })
+  const heads = await ui.findAll({ type: 'Text', text: /verifier\s+API 검증 ·/ })
   expect(heads.length).toBe(2)
   await ui.unmount()
 })
@@ -498,7 +504,7 @@ test('agentId 없이 팀원 주소만 돌려주는 실행도 기록한다', asyn
   await spawn($, '[auto-task id=API pool=verify attempt=1]\n보안 검증', 'verifier', '보안 검증')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
-  expect(await ui.find({ type: 'Text', text: /verifier\s+API 검증 #1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /verifier\s+API 검증 ·/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -519,10 +525,10 @@ test('에이전트 탭: 실행 중을 위에 펼치고, 대기·끝남은 접어
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-agents' })
   expect(await ui.find({ type: 'Text', text: /실행 중 1/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /implementer\s+API 구현 #1/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /designer\s+UI 미리보기 #1/ })).toBeUndefined() // 접혀 있다
+  expect(await ui.find({ type: 'Text', text: /implementer\s+API 구현 ·/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /designer\s+UI 미리보기 ·/ })).toBeUndefined() // 접혀 있다
   await ui.press({ key: 'toggle-done' })
-  expect(await ui.find({ type: 'Text', text: /designer\s+UI 미리보기 #1 · 일 끝남/ })).toBeDefined() // 대기 팀원의 머리 줄도 그린다
+  expect(await ui.find({ type: 'Text', text: /designer\s+UI 미리보기 · 일 끝남/ })).toBeDefined() // 대기 팀원의 머리 줄도 그린다
   await ui.unmount()
 })
 
@@ -545,4 +551,124 @@ test('머리말: 제목 별과 반짝이는 실시간 표시, 별 문자는 한 
     return head[head.length - 1]?.text.split(' ')[0]
   })
   expect(frames).toEqual(['·', '✧', '✦', '✧'])
+})
+
+// ---------------------------------------------------------------- e2e4 묶음 (4-4~4-13, N4, N7)
+
+test('에이전트: 대기 먼저, 끝남은 아래. 작업과 그 작업에 기대는 작업이 끝난 대기 팀원은 끝남이다', async () => {
+  const base = { ...SNAP, tasks: [task({ id: 'C', state: 'COMPLETED' }), task({ id: 'X', state: 'IMPLEMENTING', deps: ['C'] }), task({ id: 'Y', state: 'COMPLETED' })] }
+  const runs = [
+    run({ agentId: 'arch', role: 'architect', task: 'C', pool: 'design', attempt: 1, status: 'idle' }),
+    run({ agentId: 'ver', role: 'verifier', task: 'Y', pool: 'verify', attempt: 1, status: 'idle' }),
+    run({ agentId: 'old', role: 'implementer', task: 'Y', pool: 'implement', attempt: 1, status: 'completed', endedMs: 1 }),
+  ]
+  const g = C.doneGroups(base, runs)
+  expect(g.idle.map(r => r.agentId)).toEqual(['arch']) // 계약을 쓰는 X가 아직 구현 중이다
+  expect(g.ended.map(r => r.agentId).sort()).toEqual(['old', 'ver'])
+  const text = C.agentLines(base, runs, 10, null, true).map(l => l.map(s => s.text).join(''))
+  expect(text.findIndex(t => t.includes('architect'))).toBeLessThan(text.findIndex(t => t.includes('verifier')))
+  expect(text.some(t => t.includes('작업 끝남(팀원 대기)'))).toBe(true)
+  const later = { ...base, tasks: base.tasks.map(t => (t.id === 'X' ? { ...t, state: 'COMPLETED' as const } : t)) }
+  expect(C.doneGroups(later, runs).idle).toEqual([])
+})
+
+test('에이전트 상한: 끝난 것부터 버리고 실행 중·대기는 남긴다', async () => {
+  const runs = [run({ agentId: 'idle', status: 'idle' }), run({ agentId: 'done', status: 'completed' }), run({ agentId: 'live' })]
+  expect(C.upsertRun(runs, run({ agentId: 'new' }), 3).map(r => r.agentId)).toEqual(['idle', 'live', 'new'])
+  expect(C.upsertRun(runs, run({ agentId: 'new' }), 2).map(r => r.agentId)).toEqual(['live', 'new'])
+})
+
+test('회차: 같은 단계를 몇 번째 하는지로 보이고 첫 번째는 숫자를 붙이지 않는다', async () => {
+  const snap = { ...SNAP, events: [
+    { task: 'UI', at: '', from: 'PENDING', to: 'PREVIEWING', reason: '', pool: 'preview', attempt: 1 },
+    { task: 'UI', at: '', from: 'READY', to: 'IMPLEMENTING', reason: '', pool: 'implement', attempt: 3 },
+    { task: 'UI', at: '', from: 'RETRY', to: 'IMPLEMENTING', reason: '', pool: 'implement', attempt: 4 },
+  ] }
+  expect(C.poolRound(snap, run({ task: 'UI', pool: 'implement', attempt: 3 }))).toBe(1)
+  expect(C.poolRound(snap, run({ task: 'UI', pool: 'implement', attempt: 4 }))).toBe(2)
+  const line = C.agentLines(snap, [run({ task: 'UI', pool: 'implement', attempt: 4 })], 0, null)[1]?.map(s => s.text).join('') ?? ''
+  expect(line).toContain('UI 구현 2회차')
+})
+
+test('작업 목록: 진행 중을 위에, 완료는 접고, 펼치면 걸린 시간·토큰·작게 표시', async () => {
+  const done = task({ id: 'OLD', title: '끝난 작업', state: 'COMPLETED', profile: 'fast', started: '2026-11-24T10:00:00+09:00', completed: '2026-11-24T10:18:00+09:00' })
+  const snap = { ...SNAP, tasks: [done, ...SNAP.tasks.filter(t => t.id !== 'OLD')] }
+  const folded = C.queueLines(snap, 'all', null, 140).map(r => r.line.map(s => s.text).join(''))
+  expect(folded[0]).toContain('API')
+  expect(folded.some(t => t.includes('끝난 작업'))).toBe(false)
+  expect(folded[folded.length - 1]).toContain('완료 1 (접힘)')
+  const tok = C.mergeTaskTokens({}, [run({ agentId: 'i', task: 'OLD', tokens: 120_000 }), run({ agentId: 'v', task: 'OLD', tokens: null })])
+  const open = C.queueLines(snap, 'all', null, 160, true, tok).map(r => r.line.map(s => s.text).join(''))
+  const row = open.find(t => t.includes('끝난 작업')) ?? ''
+  expect(row).toContain('작게')
+  expect(row).toContain('⏱ 18m')
+  expect(row).toContain('≥120k tok · 에이전트 2') // 못 잰 에이전트가 있어 최소값
+  expect(open.findIndex(t => t.includes('완료 1'))).toBeLessThan(open.findIndex(t => t.includes('끝난 작업')))
+  expect(C.mergeTaskTokens(tok, [run({ agentId: 'v', task: 'OLD', tokens: 5000 })]).OLD).toEqual({ i: 120_000, v: 5000 })
+})
+
+test('머리말: 컨텍스트 %와 자리 비움 표시', async () => {
+  const text = (snap: Snapshot, pct: number | null) =>
+    C.headerLines(snap, C.EMPTY_META, [], 0, [], 120, 1000, { costUsd: null, contextPct: pct }).map(l => l.map(s => s.text).join('')).join('\n')
+  expect(text(SNAP, 42)).toContain('컨텍스트 42%')
+  expect(text(SNAP, null)).not.toContain('컨텍스트')
+  const hot = C.headerLines(SNAP, C.EMPTY_META, [], 0, [], 120, 1000, { costUsd: null, contextPct: 85 })[2]?.find(s => s.text.includes('컨텍스트'))
+  expect(hot?.tone).toBe('warn')
+  const away = { ...SNAP, away: { at: '', previews: true, reason: '' } }
+  expect(text(away, null)).toContain('☾ 자리 비움 중 · 미리보기 자동 승인')
+  const back = { ...SNAP, away: null, away_log: [{ at: '', kind: 'decision' as const, key: 'D-1', text: '문서 형식: A', reviewed: null }] }
+  expect(text(back, null)).toContain('자리 비운 동안 정한 것 1건')
+})
+
+test('명령: 자리 비움·복귀·갱신 간격', async () => {
+  expect(C.parseCommand('away previews')).toEqual({ kind: 'away', previews: true })
+  expect(C.parseCommand('back')).toEqual({ kind: 'back' })
+  expect(C.parseCommand('rate 5')).toEqual({ kind: 'rate', seconds: 5 })
+  expect(C.parseCommand('rate 3').kind).toBe('error')
+  expect([C.stepRate(1, -1), C.stepRate(1, 1), C.stepRate(5, 1), C.stepRate(10, 1), C.stepRate(3, -1)]).toEqual([1, 2, 10, 10, 2])
+  expect(C.schedArgs({ kind: 'away', previews: true }, SNAP)).toEqual({ args: ['away', '--previews', '--reason=TUI에서 자리 비움'] })
+  const snap = { ...SNAP, away_log: [{ at: '', kind: 'preview' as const, key: 'UI', text: '', reviewed: null }] }
+  expect(C.schedArgs({ kind: 'awayReview', key: 'UI', redo: false }, snap)).toEqual({ args: ['away-review', 'UI', '--keep'] })
+  expect('error' in C.schedArgs({ kind: 'awayReview', key: 'UI', redo: true }, snap)).toBe(true)
+  expect('error' in C.schedArgs({ kind: 'awayReview', key: 'NOPE', redo: false }, snap)).toBe(true)
+})
+
+test('명령 탭: 자리 비움 버튼과 갱신 간격 − +', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-commands' })
+  expect(await ui.find({ type: 'Text', text: /갱신 1초/ })).toBeDefined() // 기본 1초
+  await ui.press({ key: 'rate-up' })
+  expect(await ui.find({ type: 'Text', text: /갱신 2초/ })).toBeDefined()
+  await ui.press({ key: 'cmd-away-previews' })
+  expect(calls.argv.find(a => a.includes('away'))?.slice(-3)).toEqual(['away', '--previews', '--reason=TUI에서 자리 비움'])
+  await ui.unmount()
+})
+
+test('승인·결정 탭: 자리 비운 동안 정한 것을 이대로 두거나 다시 정한다', async ($, on) => {
+  const calls = engine(on, { ...SNAP, away_log: [{ at: '', kind: 'decision', key: 'D-0', text: '레이아웃: A (카드)', reviewed: null }] })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-decisions' })
+  expect(await ui.find({ type: 'Text', text: /자리 비운 동안 자동으로 정한 것 1건/ })).toBeDefined()
+  await ui.press({ key: 'redo-D-0' })
+  expect(calls.argv.find(a => a.includes('away-review'))?.slice(-3)).toEqual(['away-review', 'D-0', '--redo'])
+  await ui.unmount()
+})
+
+test('미리보기 수정 요청은 한 번 더 확인한 뒤에만 보낸다(승인 대신 잘못 쓰는 일)', async ($, on) => {
+  const calls = engine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-decisions' })
+  await ui.input({ key: 'fb-UI', text: '좋은것 같아!!!' })
+  expect(calls.argv.some(a => a.includes('revise'))).toBe(false)
+  expect(await ui.find({ type: 'Text', text: /수정 요청으로 보낼까/ })).toBeDefined()
+  await ui.press({ key: 'fb-cancel-UI' })
+  expect(calls.argv.some(a => a.includes('revise'))).toBe(false)
+  await ui.input({ key: 'fb-UI', text: '버튼을 더 크게' })
+  await ui.press({ key: 'fb-send-UI' })
+  expect(calls.argv.find(a => a.includes('revise'))?.slice(-4)).toEqual(['--version', '2', '--feedback=버튼을 더 크게', '--by', 'tui'].slice(-4))
+  await ui.unmount()
 })

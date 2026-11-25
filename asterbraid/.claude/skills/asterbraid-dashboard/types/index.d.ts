@@ -33,6 +33,8 @@ export type SnapTask = {
   design_depth?: string | null
   /** 조사·설계 노트 경로(sched done --notes) */
   notes?: string[]
+  /** 첫 배정 시각(걸린 시간 계산). 옛 스냅샷에는 없다 */
+  started?: string | null
   pool: string | null
   runnable: boolean
   waiting: string | null
@@ -73,6 +75,10 @@ export type Snapshot = {
   project: { root: string; name: string; state_dir: string }
   integration: { branch: string | null; head: string | null }
   paused: { at: string; reason: string } | null
+  /** 사용자 자리 비움(sched away). 옛 스냅샷에는 없다 */
+  away?: { at: string; previews: boolean; reason: string } | null
+  /** 자리 비움 중 추천안으로 정한 것. reviewed: null(확인 전) | keep | redo:<새 결정 ID> */
+  away_log?: AwayEntry[]
   total: number
   completed: number
   counts: Record<string, number>
@@ -86,6 +92,11 @@ export type Snapshot = {
   anomalies: { kind: 'long-stage'; task: string; state: string; seconds: number; median_s: number; text: string }[]
   dashboard_html: string
 }
+
+export type AwayEntry = { at: string; kind: 'decision' | 'preview'; key: string; text: string; reviewed: string | null }
+
+/** 작업별 에이전트 토큰. 세션을 다시 열어도 남도록 $.store에 둔다(에이전트 id → 토큰, 못 쟀으면 null) */
+export type TaskTokens = Record<string, Record<string, number | null>>
 
 /** 숫자로만 정한 경고. 스케줄러(long-stage)와 이 세션의 관측(stall·repeat-fail·ghost)에서 온다. */
 export type Anomaly = { kind: 'long-stage' | 'stall' | 'repeat-fail' | 'ghost'; task: string | null; agentId: string | null; text: string }
@@ -141,6 +152,10 @@ export type View = {
   errorsOnly: boolean
   /** 에이전트 탭에서 대기·끝난 에이전트를 펼칠지 */
   showDone: boolean
+  /** 작업 탭에서 완료·취소 작업을 펼칠지 */
+  showDoneTasks: boolean
+  /** 보내기 전 확인을 기다리는 미리보기 수정 요청(승인 대신 잘못 쓰는 일을 막는다) */
+  pendingRevise: { task: string; version: number; text: string } | null
   lastAction: string | null
 }
 

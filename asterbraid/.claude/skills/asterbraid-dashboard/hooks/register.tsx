@@ -4,7 +4,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Activity, Run, SnapMeta, Snapshot, Tab, Usage, View } from '../types'
+import type { Activity, Run, SnapMeta, Snapshot, Tab, TaskTokens, Usage, View } from '../types'
 import * as C from './core'
 
 const PANE = 'asterbraid'
@@ -15,7 +15,7 @@ const snapA = atom({ plugin: 'asterbraid-dashboard', key: 'snap' } as const, nul
 const metaA = atom({ plugin: 'asterbraid-dashboard', key: 'meta' } as const, C.EMPTY_META, { shape: 'meta-2' })
 const runsA = atom({ plugin: 'asterbraid-dashboard', key: 'runs' } as const, [] as Run[], { shape: 'runs-3' })
 const activityA = atom({ plugin: 'asterbraid-dashboard', key: 'activity' } as const, [] as Activity[], { shape: 'activity-1' })
-const viewA = atom({ plugin: 'asterbraid-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-3' })
+const viewA = atom({ plugin: 'asterbraid-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-4' })
 const usageA = atom({ plugin: 'asterbraid-dashboard', key: 'usage' } as const, { costUsd: null, contextPct: null } as Usage, { shape: 'usage-1' })
 
 const TONE_COLOR: Record<C.Tone, string | undefined> = {
@@ -30,6 +30,9 @@ const inflight = new Set<string>() // 실행 중인 상태 변경. 같은 버튼
 let pollSince = 0 // 읽기가 걸려 끝나지 않으면 이 시각부터 30초 뒤 다시 허용한다
 let tick = 0
 let timer: { cancel: () => void } | null = null
+let rateSec: number | null = null // Pane에서 고른 갱신 간격(초). 리로드 뒤에는 $.store에서 다시 읽는다
+const RATE_KEY = 'refreshSeconds'
+const refreshMs = () => (rateSec ?? cfg.refreshMs / 1000) * 1000
 const pendingTools = new Map<string, C.ToolBatch>() // 도구 호출마다 상태를 쓰지 않고 틱마다 모아 쓴다
 const warned = new Set<string>() // 이미 알린 경고. 사라지면 지워 다시 생기면 또 알린다
 const pendingActivity: Activity[] = []
@@ -130,7 +133,7 @@ async function poll($: EngineInterface, force = false) {
     await update($, metaA, x => ({ ...x, readAtMs: now, mtimeMs: st.mtimeMs, error: staleErr, stale: staleErr !== null }))
     for (const c of C.changes(before, parsed.snap)) {
       log('warn', 'mod', null, c, now)
-      if (cfg.notify) $.ui.toast(`autonomous: ${c}`)
+      if (cfg.notify) $.ui.toast(`AsterBraid: ${c}`)
     }
     await showStatus($)
   } catch (err) {
@@ -159,7 +162,7 @@ async function checkAnomalies($: EngineInterface) {
   for (const w of fresh) {
     warned.add(C.anomalyKey(w))
     log('warn', 'mod', w.task, `경고: ${w.text}`, now)
-    if (cfg.notify) $.ui.toast(`autonomous ⚠ ${w.text}`)
+    if (cfg.notify) $.ui.toast(`AsterBraid ⚠ ${w.text}`)
   }
   if (fresh.length && cfg.tellManager) {
     const text = `[asterbraid-dashboard 관측 경고] ${fresh.map(w => w.text).join(' / ')}. 원인을 확인하고 필요하면 sched recover·재배정·사용자 보고를 판단한다.`
@@ -175,6 +178,15 @@ async function observe($: EngineInterface) {
     const now = await $.clock.now()
     if (agents) await update($, runsA, list => C.applyAgentList(C.listOf<Run>(list), agents, now))
   }
+  // 작업별 토큰은 세션을 다시 열어도 남게 $.store에 둔다
+  const root = (await read($, metaA)).root
+  const runsNow = C.listOf<Run>(await read($, runsA))
+  if (root && runsNow.some(r => r.task)) {
+    const key = `tok:${root}`
+    const stored = ((await $.store.get(key).catch(() => null)) ?? {}) as TaskTokens
+    const merged = C.mergeTaskTokens(stored, runsNow)
+    if (JSON.stringify(merged) !== JSON.stringify(stored)) await $.store.set(key, merged).catch(() => undefined)
+  }
   const u = await $.session.usage().catch(() => null)
   if (u) await update($, usageA, () => ({ costUsd: u.cost?.usd ?? null, contextPct: u.context.percent ?? null }))
 }
@@ -185,8 +197,22 @@ async function observe($: EngineInterface) {
  */
 function ensureTimer($: EngineInterface) {
   if (timer) return
-  timer = $.clock.every(cfg.refreshMs, () => void onTick($).catch(() => undefined))
+  timer = $.clock.every(refreshMs(), () => void onTick($).catch(() => undefined))
+  if (rateSec === null) {
+    void $.store.get(RATE_KEY).then(v => {
+      if (typeof v === 'number' && (C.RATES as readonly number[]).includes(v) && v * 1000 !== refreshMs()) void setRate($, v)
+    }).catch(() => undefined)
+  }
   if (!sysname) void $.session.machine().then(m => { sysname = m?.sysname ?? sysname }).catch(() => undefined)
+}
+
+async function setRate($: EngineInterface, seconds: number) {
+  rateSec = seconds
+  await $.store.set(RATE_KEY, seconds)
+  timer?.cancel()
+  timer = null
+  ensureTimer($)
+  return `화면 갱신 ${seconds}초`
 }
 
 async function onTick($: EngineInterface) {
@@ -295,8 +321,8 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'asterbraid',
-      description: 'autonomous 관제 Pane과 미리보기: open|close|status|agents|queue|timeline|git|decisions|metrics|errors|preview|refresh|help',
-      argumentHint: '[open|close|<탭>|preview [ID [vN]]|refresh|layout L|help]',
+      description: 'AsterBraid 관제 Pane과 미리보기: open|close|status|agents|queue|timeline|git|decisions|metrics|errors|preview|refresh|help',
+      argumentHint: '[open|close|<탭>|preview [ID [vN]]|refresh|away|back|rate N|help]',
       immediate: true,
     })
     sysname = (await $.session.machine().catch(() => null))?.sysname ?? ''
@@ -420,6 +446,8 @@ export const register: Register = (on, options) => {
         return say(await refreshNow($))
       case 'preview':
         return say(await openPreview($, a.task, a.version))
+      case 'rate':
+        return say(await setRate($, a.seconds))
       default:
         return say(await act($, a))
     }
@@ -436,6 +464,9 @@ export const register: Register = (on, options) => {
       read($, snapA), read($, metaA), read($, runsA), read($, activityA), read($, viewA), read($, usageA), $.clock.now(),
     ])
     const view = C.normalizeView(view0)
+    const rate = (await $.store.get(RATE_KEY).catch(() => null)) as number | null
+    const curRate = typeof rate === 'number' ? rate : cfg.refreshMs / 1000
+    const tok = (snap ? ((await $.store.get(`tok:${snap.project.root}`).catch(() => null)) ?? {}) : {}) as TaskTokens
     const W = Math.max(24, e.props.bodyColumns)
     const layout = C.pickLayout(view.layout ?? cfg.layout, e.props.placement, W)
 
@@ -492,6 +523,11 @@ export const register: Register = (on, options) => {
             <Button key="cmd-layout" label={`배치: ${LAYOUT_LABEL[curLayout] ?? curLayout}`} onPress={() => setView($, v => ({ ...v, layout: nextLayout(curLayout) }))} />
             <Button key="cmd-close" label="Pane 닫기" onPress={() => $.ui.close({ id: PANE })} />
           </Box>
+          <Box columnGap={1}>
+            <Text>{`갱신 ${curRate}초`}</Text>
+            <Button key="rate-down" label="−" plain onPress={() => setRate($, C.stepRate(curRate, -1)).then(say)} />
+            <Button key="rate-up" label="+" plain onPress={() => setRate($, C.stepRate(curRate, 1)).then(say)} />
+          </Box>
           {line(C.section('사용자 차례', W))}
           <Box columnGap={1}>
             <Button key="cmd-decisions" label={`승인·결정 열기 (${userWait}건)`} variant={userWait ? 'primary' : undefined} onPress={() => setView($, v => ({ ...v, tab: 'decisions' }))} />
@@ -506,6 +542,20 @@ export const register: Register = (on, options) => {
                 <Button key="cmd-pause" label="새 배정 일시 중지" onPress={() => act($, { kind: 'pause', reason: 'TUI에서 일시 중지' })} />
               )}
               <Text dimColor>{snap.paused ? `중지됨: ${snap.paused.reason}` : '실행 중인 에이전트는 계속된다'}</Text>
+            </Box>
+          )}
+          {can && line(C.section('자리 비움 (밤새 맡길 때)', W))}
+          {can && (
+            <Box columnGap={1} flexWrap="wrap">
+              {snap.away ? (
+                <Button key="cmd-back" label="복귀" variant="primary" onPress={() => act($, { kind: 'back' })} />
+              ) : (
+                <Box columnGap={1}>
+                  <Button key="cmd-away" label="자리 비움" onPress={() => act($, { kind: 'away', previews: false })} />
+                  <Button key="cmd-away-previews" label="자리 비움 + 미리보기 자동 승인" onPress={() => act($, { kind: 'away', previews: true })} />
+                </Box>
+              )}
+              <Text dimColor>{snap.away ? '복귀하면 자리 비운 동안 정한 것을 4번 탭에서 확인한다' : '화면·방향 결정은 추천안으로 정하고 계속한다. 의존성·호환 깨짐·환경·데이터는 기다린다'}</Text>
             </Box>
           )}
           {can && line(C.section('동시 실행 한도', W))}
@@ -550,6 +600,14 @@ export const register: Register = (on, options) => {
           <Button key="open-dashboard" label="미리보기 대시보드 열기(브라우저)" onPress={async () => setView($, v => ({ ...v, lastAction: 'ℹ ' }))
             .then(() => openPreview($, null, null))
             .then(text => setView($, v => ({ ...v, lastAction: `ℹ ${C.fit(text, 100)}` })))} />
+          {C.pendingAway(snap).length > 0 && <Text bold color="suggestion">{`☾ 자리 비운 동안 자동으로 정한 것 ${C.pendingAway(snap).length}건`}</Text>}
+          {C.pendingAway(snap).map(x => (
+            <Box key={`aw-${x.key}`} columnGap={1} flexWrap="wrap">
+              {line([{ text: `${x.kind === 'decision' ? '결정' : '미리보기'} ${x.key} `, bold: true }, { text: x.text, tone: 'dim' }])}
+              {can && <Button key={`keep-${x.key}`} label="이대로 둠" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: false })} />}
+              {can && x.kind === 'decision' && <Button key={`redo-${x.key}`} label="다시 정하기" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: true })} />}
+            </Box>
+          ))}
           <Text bold color="claude">미리보기 검토 {waiting.length}건</Text>
           {waiting.length === 0 && <Text dimColor>검토를 기다리는 미리보기가 없다</Text>}
           {waiting.map(t => {
@@ -564,13 +622,23 @@ export const register: Register = (on, options) => {
                   <Button key={`open-${t.id}`} label={`열기 v${v.n}`} onPress={() => openPreview($, t.id, v.n).then(text => setView($, x => ({ ...x, lastAction: `ℹ ${C.fit(text, 100)}` })))} />
                   {can && <Button key={`ok-${t.id}`} label={`승인 v${v.n}`} variant="primary" onPress={() => act($, { kind: 'approve', task: t.id, version: v.n })} />}
                 </Box>
-                {can && Input && (
+                {can && Input && view.pendingRevise?.task !== t.id && (
                   <Input
                     key={`fb-${t.id}`}
-                    label={`v${v.n} 수정 요청`}
+                    label={`v${v.n} 수정 요청 (승인은 위 [승인] 버튼)`}
                     placeholder="무엇을 바꿀지 쓰고 Enter"
-                    onSubmit={text => (text.trim() ? act($, { kind: 'revise', task: t.id, version: v.n, feedback: text.trim() }) : undefined)}
+                    onSubmit={text => (text.trim() ? setView($, x => ({ ...x, pendingRevise: { task: t.id, version: v.n, text: text.trim() } })) : undefined)}
                   />
+                )}
+                {can && view.pendingRevise?.task === t.id && (
+                  <Box columnGap={1} flexWrap="wrap">
+                    {line([{ text: `수정 요청으로 보낼까? "${C.fit(view.pendingRevise.text, 40)}" `, tone: 'warn' }])}
+                    <Button key={`fb-send-${t.id}`} label="수정 요청 보내기" onPress={() => {
+                      const pr = view.pendingRevise
+                      return setView($, x => ({ ...x, pendingRevise: null })).then(() => (pr ? act($, { kind: 'revise', task: t.id, version: pr.version, feedback: pr.text }) : undefined))
+                    }} />
+                    <Button key={`fb-cancel-${t.id}`} label="취소" onPress={() => setView($, x => ({ ...x, pendingRevise: null }))} />
+                  </Box>
                 )}
               </Box>
             )
@@ -616,11 +684,14 @@ export const register: Register = (on, options) => {
               onPress={() => setView($, v => ({ ...v, filter: C.FILTERS[(C.FILTERS.indexOf(v.filter) + 1) % C.FILTERS.length] ?? 'all' }))}
             />
           )}
+          {view.taskMode === 'list' && view.filter === 'all' && snap.tasks.some(t => t.state === 'COMPLETED' || t.state === 'CANCELLED') && (
+            <Button key="toggle-done-tasks" label={view.showDoneTasks ? '완료 접기' : '완료 펼치기'} onPress={() => setView($, v => ({ ...v, showDoneTasks: !v.showDoneTasks }))} />
+          )}
           <Text dimColor>{view.taskMode === 'list' ? '줄을 누르면 담당 경로·완료 기준을 펼친다' : '기록된 시작·끝 시각으로 그린다'}</Text>
         </Box>
         {view.taskMode === 'timeline'
           ? lines(C.timelineLines(snap, now, W))
-          : C.queueLines(snap, view.filter, view.expanded, W).map((r, i) =>
+          : C.queueLines(snap, view.filter, view.expanded, W, view.showDoneTasks, tok).map((r, i) =>
               r.id ? (
                 <Box key={`qr-${r.id}`} flexDirection="column">
                   <Button key={`q-${r.id}`} plain onPress={() => setView($, v => ({ ...v, expanded: v.expanded === r.id ? null : (r.id ?? null) }))}>
@@ -675,7 +746,7 @@ export const register: Register = (on, options) => {
       }
     }
 
-    const header = lines(C.headerLines(snap, meta, runs, now, warns, W, cfg.refreshMs))
+    const header = lines(C.headerLines(snap, meta, runs, now, warns, W, curRate * 1000, usage))
     const footer = view.lastAction ? <Text dimColor wrap="wrap">{view.lastAction}</Text> : null // 경로를 자르지 않는다
 
     // 넓은 자리에서는 표 위주 탭 옆에 에이전트 목록을 붙인다. 버튼이 많은 탭은 한 줄로 쓴다

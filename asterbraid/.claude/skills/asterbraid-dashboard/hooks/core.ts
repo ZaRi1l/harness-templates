@@ -1,5 +1,5 @@
 // 순수 함수만 둔다: 입력이 같으면 결과가 같고, $·파일·프로세스를 만지지 않는다. 테스트는 이 파일을 직접 검사한다.
-import type { Activity, Anomaly, Decision, Layout, QueueFilter, Run, SnapMeta, SnapTask, Snapshot, Tab, TaskMode, View } from '../types'
+import type { Activity, Anomaly, AwayEntry, Decision, Layout, QueueFilter, Run, SnapMeta, SnapTask, Snapshot, Tab, TaskMode, TaskTokens, Usage, View } from '../types'
 
 export const SCHEMA_VERSION = 1
 export const TABS: readonly Tab[] = ['overview', 'tasks', 'agents', 'decisions', 'git', 'activity', 'commands']
@@ -12,7 +12,7 @@ export const POOLS = ['research', 'design', 'preview', 'implement'] as const
 export const POOL_LABEL: Record<string, string> = {
   research: '조사', design: '설계', preview: '미리보기', implement: '구현', verify: '검증', merge: '통합',
 }
-export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, filter: 'all', taskMode: 'list', expanded: null, errorsOnly: false, showDone: false, lastAction: null }
+export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, filter: 'all', taskMode: 'list', expanded: null, errorsOnly: false, showDone: false, showDoneTasks: false, pendingRevise: null, lastAction: null }
 export const EMPTY_META: SnapMeta = { root: null, stateDir: null, readAtMs: 0, checkedMs: 0, mtimeMs: 0, error: null, stale: false }
 
 export type Tone = 'ok' | 'warn' | 'err' | 'dim' | 'accent' | 'info' | 'plain'
@@ -63,6 +63,8 @@ export const normalizeView = (v: unknown): View => {
     expanded: typeof x.expanded === 'string' ? x.expanded : null,
     errorsOnly: x.errorsOnly === true,
     showDone: x.showDone === true,
+    showDoneTasks: x.showDoneTasks === true,
+    pendingRevise: x.pendingRevise && typeof x.pendingRevise === 'object' && typeof x.pendingRevise.text === 'string' ? x.pendingRevise : null,
     lastAction: typeof x.lastAction === 'string' ? x.lastAction : null,
   }
 }
@@ -94,9 +96,17 @@ export const parseMarker = (prompt: string): { task: string; pool: string; attem
   return m && m[1] && m[2] ? { task: m[1], pool: m[2], attempt: Number(m[3]) } : null
 }
 
+/** 상한을 넘으면 끝난 것부터, 그다음 대기, 마지막에 실행 중인 것을 오래된 순으로 버린다. */
 export const upsertRun = (runs: Run[], run: Run, max = 60): Run[] => {
-  const rest = runs.filter(r => r.agentId !== run.agentId)
-  return [...rest, run].slice(-max)
+  const all = [...runs.filter(r => r.agentId !== run.agentId), run]
+  for (const drop of [(r: Run) => r.status !== 'running' && r.status !== 'idle', (r: Run) => r.status === 'idle', () => true]) {
+    while (all.length > max) {
+      const i = all.findIndex(drop)
+      if (i < 0) break
+      all.splice(i, 1)
+    }
+  }
+  return all
 }
 
 /** 스케줄러 슬롯을 차지한 작업 중 이 세션에서 실행이 관측되지 않은 것. 배정과 실제 실행을 구분해 보여 준다. */
@@ -222,6 +232,10 @@ export type Action =
   | { kind: 'limit'; pool: string; n: number }
   | { kind: 'priority'; task: string; n: number }
   | { kind: 'unblock'; task: string }
+  | { kind: 'away'; previews: boolean }
+  | { kind: 'back' }
+  | { kind: 'awayReview'; key: string; redo: boolean }
+  | { kind: 'rate'; seconds: number }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
@@ -250,7 +264,17 @@ export const HELP = [
   '/asterbraid pause [사유] | resume  새 배정만 멈춤 / 재개 (실행 중인 에이전트는 계속)',
   '/asterbraid limit POOL N | priority ID N',
   '/asterbraid unblock ID            보류 해제 (sched.py가 재작업·준비 상태로 되돌린다)',
+  '/asterbraid away [previews] | back  자리 비움(화면·방향 결정은 추천안, previews면 미리보기도 자동 승인) / 복귀',
+  '/asterbraid rate 1|2|5|10         화면 갱신 간격(초)',
 ]
+
+/** 갱신 간격 단계(초). − + 버튼은 한 단계씩 움직이고 끝에서 멈춘다. */
+export const RATES = [1, 2, 5, 10] as const
+export const stepRate = (cur: number, dir: 1 | -1): number => {
+  const i = RATES.findIndex(r => r >= cur)
+  const at = i < 0 ? RATES.length - 1 : i
+  return RATES[Math.min(RATES.length - 1, Math.max(0, at + dir))] ?? cur
+}
 
 export const parseCommand = (args: string): Action => {
   const words = args.trim().split(/\s+/).filter(Boolean)
@@ -289,6 +313,12 @@ export const parseCommand = (args: string): Action => {
   if (head === 'unblock') {
     const [task] = rest
     return task && ID.test(task) ? { kind: 'unblock', task } : { kind: 'error', message: '/asterbraid unblock ID' }
+  }
+  if (head === 'away') return { kind: 'away', previews: rest[0] === 'previews' || rest[0] === '--previews' }
+  if (head === 'back') return { kind: 'back' }
+  if (head === 'rate') {
+    const k = Number(rest[0])
+    return (RATES as readonly number[]).includes(k) ? { kind: 'rate', seconds: k } : { kind: 'error', message: '/asterbraid rate 1|2|5|10' }
   }
   if (head === 'pause') return { kind: 'pause', reason: rest.join(' ') }
   if (head === 'resume') return { kind: 'resume' }
@@ -342,6 +372,16 @@ export const schedArgs = (a: Action, snap: Snapshot | null): { args: string[] } 
       if (!t) return { error: `스냅샷에 작업이 없다: ${a.task}` }
       if (t.state !== 'BLOCKED') return { error: `${a.task}는 보류 상태가 아니다(${t.state})` }
       return { args: ['unblock', a.task, '--reason=TUI에서 보류 해제'] }
+    }
+    case 'away':
+      return { args: ['away', ...(a.previews ? ['--previews'] : []), '--reason=TUI에서 자리 비움'] }
+    case 'back':
+      return { args: ['back'] }
+    case 'awayReview': {
+      const e = pendingAway(snap).find(x => x.key === a.key)
+      if (!e) return { error: `확인할 자동 결정이 없다: ${a.key}` }
+      if (a.redo && e.kind !== 'decision') return { error: '미리보기는 다시 정하기를 지원하지 않는다. manager에게 수정을 요청한다' }
+      return { args: ['away-review', a.key, a.redo ? '--redo' : '--keep'] }
     }
     case 'pause':
       return { args: ['pause', `--reason=${a.reason || 'TUI에서 일시 중지'}`] }
@@ -458,6 +498,42 @@ export const applyAgentList = (runs: Run[], agents: readonly AgentSeen[], now: n
 export const slotUsed = (snap: Snapshot) => POOLS.reduce((n, p) => n + (snap.slots[p]?.used ?? 0), 0)
 export const openDecisions = (snap: Snapshot | null): Decision[] => (snap?.decisions ?? []).filter(d => d.state === 'OPEN')
 export const awaiting = (snap: Snapshot | null) => (snap?.tasks ?? []).filter(t => t.state === 'AWAITING_APPROVAL')
+/** 자리 비운 동안 추천안으로 정했고 사용자가 아직 확인하지 않은 것. */
+export const pendingAway = (snap: Snapshot | null): AwayEntry[] => (snap?.away_log ?? []).filter(x => x.reviewed === null)
+
+/** 이 실행의 작업에서 같은 단계가 몇 번째인지(스냅샷 이벤트 기준). 모르면 null. */
+export const poolRound = (snap: Snapshot | null, r: Run): number | null => {
+  if (!snap || !r.task || !r.pool || r.attempt === null) return null
+  const n = snap.events.filter(e => e.task === r.task && e.pool === r.pool && (e.attempt ?? 0) <= (r.attempt ?? 0)).length
+  return n || null
+}
+
+/**
+ * 대기(idle) 팀원이 더 쓰일 일이 없는지: 자기 작업이 완료·취소됐고, 그 작업에 기대는 작업도 모두 끝났다.
+ * 예: 계약 설계 architect는 계약을 쓰는 구현들이 끝날 때까지 다시 불릴 수 있다.
+ */
+export const retired = (snap: Snapshot | null, r: Run): boolean => {
+  if (r.status !== 'idle' || !snap || !r.task) return false
+  const over = (id: string) => ['COMPLETED', 'CANCELLED'].includes(snap.tasks.find(t => t.id === id)?.state ?? '')
+  return over(r.task) && snap.tasks.filter(t => t.deps.includes(r.task ?? '')).every(t => over(t.id))
+}
+
+/** 작업별 토큰 기록에 지금 실행들을 더한다(같은 에이전트는 최신 값으로). */
+export const mergeTaskTokens = (stored: TaskTokens, runs: Run[]): TaskTokens => {
+  const out: TaskTokens = {}
+  for (const [k, v] of Object.entries(stored ?? {})) out[k] = { ...v }
+  for (const r of runs) {
+    if (!r.task) continue
+    const t = (out[r.task] ??= {})
+    t[r.agentId] = r.tokens ?? t[r.agentId] ?? null
+  }
+  return out
+}
+
+export const taskTokenSummary = (tok: TaskTokens, task: string) => {
+  const by = Object.values(tok[task] ?? {})
+  return by.length ? { tokens: by.reduce<number>((n, x) => n + (x ?? 0), 0), agents: by.length, partial: by.some(x => x === null) } : null
+}
 
 /** 완료율은 작업 수 기준이다. 작업 크기가 달라 공수 진행률이 아니다. */
 export const progress = (snap: Snapshot) => {
@@ -597,7 +673,7 @@ export const wrapText = (s: string, w: number, maxLines: number): string[] => {
  * 모든 탭 위에 놓는 머리말. 오른쪽 위 회전 표시는 Mod가 스냅샷 파일을 확인할 때마다 한 칸 돈다.
  * 숫자가 그대로여도 표시가 돌면 자동 갱신이 살아 있다는 뜻이다.
  */
-export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: number, warns: Anomaly[], width: number, refreshMs: number): Line[] => {
+export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: number, warns: Anomaly[], width: number, refreshMs: number, usage: Usage | null = null): Line[] => {
   const p = progress(snap)
   const live: Seg = meta.stale
     ? { text: '✗ 갱신 실패', tone: 'err', bold: true }
@@ -617,7 +693,11 @@ export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: nu
   lines.push([
     { text: `실행 ${runningRuns(runs).length} · 배정 ${slotUsed(snap)} · 검증 ${snap.counts.VERIFYING ?? 0} · 통합 대기 ${snap.counts.READY_TO_MERGE ?? 0}`, tone: 'dim' },
     ...(missing ? [{ text: ` · 실행 미확인 ${missing}`, tone: 'warn' as Tone }] : []),
+    // 메인 세션(manager)의 컨텍스트. 값을 못 받으면 숨긴다
+    ...(usage?.contextPct != null ? [{ text: ` · 컨텍스트 ${Math.round(usage.contextPct)}%`, tone: (usage.contextPct >= 80 ? 'warn' : 'dim') as Tone, bold: usage.contextPct >= 80 }] : []),
   ])
+  if (snap.away) lines.push([{ text: `☾ 자리 비움 중${snap.away.previews ? ' · 미리보기 자동 승인' : ''}`, tone: 'info', bold: true }, { text: '  → 7 명령 탭에서 복귀', tone: 'dim' }])
+  else if (pendingAway(snap).length) lines.push([{ text: `☾ 자리 비운 동안 정한 것 ${pendingAway(snap).length}건 확인`, tone: 'info', bold: true }, { text: '  → 4 승인·결정 탭', tone: 'dim' }])
   const wait = awaiting(snap).length
   const dec = openDecisions(snap).length
   if (wait || dec) lines.push([{ text: `▶ 사용자 차례: 미리보기 승인 ${wait} · 결정 ${dec}`, tone: 'warn', bold: true }, { text: '  → 4 승인·결정 탭', tone: 'dim' }])
@@ -635,8 +715,12 @@ const ORDER: Record<string, number> = { IMPLEMENTING: 0, RETRY: 0, VERIFYING: 1,
 /** 현황 탭: 작업 표, manager 설명, 병목, 최근 변화. 숫자 요약은 머리말에 있다. */
 export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: number): Line[] => {
   const lines: Line[] = [section('작업', width)]
-  const tasks = snap.tasks.filter(t => t.state !== 'CANCELLED').sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9) || b.priority - a.priority)
-  if (!tasks.length) lines.push([{ text: '등록된 작업이 없다. manager가 sched add로 등록한다', tone: 'dim' }])
+  const sorted = snap.tasks.filter(t => t.state !== 'CANCELLED').sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9) || b.priority - a.priority)
+  const live = sorted.filter(t => t.state !== 'COMPLETED')
+  const doneN = sorted.length - live.length
+  // 진행 중인 것이 있으면 완료는 한 줄로 접는다(쌓이면 진행 중인 것이 안 보인다)
+  const tasks = live.length ? live : sorted
+  if (!sorted.length) lines.push([{ text: '등록된 작업이 없다. manager가 sched add로 등록한다', tone: 'dim' }])
   const titleW = Math.max(8, width - 2 - 9 - 9 - 22)
   for (const t of tasks.slice(0, 8)) {
     const m = mark(t.state)
@@ -660,6 +744,7 @@ export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: n
     ])
   }
   if (tasks.length > 8) lines.push([{ text: `  외 ${tasks.length - 8}개 → 2 작업 탭`, tone: 'dim' }])
+  if (live.length && doneN) lines.push([{ text: `✓ 완료 ${doneN}개 → 2 작업 탭`, tone: 'dim' }])
   const note = snap.notes[snap.notes.length - 1]
   if (note) {
     lines.push(section(`manager · ${note.kind}${note.task ? ` · ${note.task}` : ''}`, width))
@@ -687,19 +772,44 @@ export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: n
 /** 대기열 행. id가 있는 행은 작업의 첫 줄이라 눌러서 펼칠 수 있다. */
 export type Row = { line: Line; id?: string }
 
-export const queueLines = (snap: Snapshot, filter: QueueFilter, expanded: string | null, width: number): Row[] => {
-  const tasks = snap.tasks.filter(t => inFilter(t, filter))
-  if (tasks.length === 0) return [{ line: [{ text: '해당하는 작업이 없다', tone: 'dim' }] }]
+const DONE_SHOWN = 20
+const isDone = (t: SnapTask) => t.state === 'COMPLETED' || t.state === 'CANCELLED'
+
+/** 완료 작업의 걸린 시간(첫 배정→완료, 대기 포함)과 토큰. 모르면 빈 문자열. */
+export const costText = (t: SnapTask, tok: TaskTokens) => {
+  const a = ms(t.started ?? null)
+  const b = ms(t.completed)
+  const s = taskTokenSummary(tok, t.id)
+  const parts = [
+    ...(a !== null && b !== null && b >= a ? [`⏱ ${fmtDur(b - a)}`] : []),
+    ...(s ? [`${s.partial ? '≥' : ''}${Math.round(s.tokens / 1000)}k tok · 에이전트 ${s.agents}`] : []),
+  ]
+  return parts.join(' · ')
+}
+
+/**
+ * 진행 중·대기·보류를 위에, 완료·취소는 아래에 접어 둔다(showDone이면 최근 완료 20개까지).
+ * 필터가 '완료'면 완료만 펼친다.
+ */
+export const queueLines = (snap: Snapshot, filter: QueueFilter, expanded: string | null, width: number, showDone = false, tok: TaskTokens = {}): Row[] => {
+  const matched = snap.tasks.filter(t => inFilter(t, filter))
+  if (matched.length === 0) return [{ line: [{ text: '해당하는 작업이 없다', tone: 'dim' }] }]
+  const live = matched.filter(t => !isDone(t)).sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9) || b.priority - a.priority)
+  const done = matched.filter(isDone).sort((a, b) => (b.completed ?? b.updated).localeCompare(a.completed ?? a.updated))
   const out: Row[] = []
   const push = (line: Line, id?: string) => out.push({ line: fitLine(line, width), id })
-  for (const t of tasks) {
+  const open = filter === 'done' || showDone
+  const draw = (t: SnapTask) => {
     const m = mark(t.state)
+    const cost = t.state === 'COMPLETED' ? costText(t, tok) : ''
     push([
       { text: `${m.mark} `, tone: m.tone },
       { text: pad(t.id, 10), bold: true },
       { text: pad(m.label, 8), tone: m.tone },
       { text: `p${t.priority} ${t.risk}/${t.profile} ↻${t.retries} `, tone: 'dim' },
+      ...(t.profile === 'fast' ? [{ text: '작게 ', tone: 'accent' as Tone }] : []),
       { text: t.title },
+      ...(cost ? [{ text: `  ${cost}`, tone: 'dim' as Tone }] : []),
     ], t.id)
     const why = t.decisions_open.length ? `결정 대기 ${t.decisions_open.join(',')}` : t.waiting
     if (why) push([{ text: `    ⋯ ${why}`, tone: t.runnable ? 'ok' : 'warn' }])
@@ -714,6 +824,13 @@ export const queueLines = (snap: Snapshot, filter: QueueFilter, expanded: string
       if (t.reason) push(kv('    사유', t.reason))
     }
   }
+  live.forEach(draw)
+  if (done.length && filter !== 'done') {
+    const c = done.filter(t => t.state === 'CANCELLED').length
+    push([{ text: `완료 ${done.length - c}${c ? ` · 취소 ${c}` : ''}${open ? '' : ' (접힘)'}`, tone: 'accent', bold: true }])
+  }
+  if (open) done.slice(0, DONE_SHOWN).forEach(draw)
+  if (open && done.length > DONE_SHOWN) push([{ text: `  이전 ${done.length - DONE_SHOWN}개는 sched status로 본다`, tone: 'dim' }])
   return out
 }
 
@@ -739,7 +856,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => ({
   openOnStart: o.openOnStart !== false,
   layout: (['auto', 'mini', 'compact', 'wide'] as const).includes(o.layout as Layout) ? (o.layout as Layout) : 'auto',
   paneColumns: clamp(o.paneColumns, 40, 200, 90),
-  refreshMs: clamp(o.refreshSeconds, 1, 30, 2) * 1000,
+  refreshMs: clamp(o.refreshSeconds, 1, 30, 1) * 1000,
   allowActions: o.allowActions !== false,
   toolDetail: o.toolDetail === 'masked' ? 'masked' : 'names',
   launcher: ['uv', 'python', 'python3', 'py'].includes(o.launcher as string) ? (o.launcher as string) : 'uv',
@@ -750,11 +867,14 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => ({
   tellManager: o.tellManager === true,
 })
 
-/** 대기(idle)·끝난 에이전트 수. 접힌 줄에 쓴다. */
-export const doneCounts = (runs: Run[]) => ({
-  idle: runs.filter(r => r.status === 'idle').length,
-  ended: runs.filter(r => r.status !== 'running' && r.status !== 'idle').length,
-})
+/** 대기(다시 쓰일 수 있는 idle)·끝남(끝났거나 더 쓰일 일이 없는 idle) 에이전트. */
+export const doneGroups = (snap: Snapshot | null, runs: Run[]) => {
+  const rest = runs.filter(r => r.status !== 'running').reverse()
+  return {
+    idle: rest.filter(r => r.status === 'idle' && !retired(snap, r)),
+    ended: rest.filter(r => r.status !== 'idle' || retired(snap, r)),
+  }
+}
 
 /**
  * 에이전트 목록. 실행 중인 것을 위에 펼치고, 대기·끝난 것은 showDone일 때만 그 아래에 그린다
@@ -763,18 +883,20 @@ export const doneCounts = (runs: Run[]) => ({
 export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expanded: string | null, showDone = false): Line[] => {
   const out: Line[] = []
   const running = runningRuns(runs)
-  const rest = runs.filter(r => r.status !== 'running').reverse()
+  const g = doneGroups(snap, runs)
   if (runs.length === 0) out.push([{ text: '이 세션에서 관측한 서브에이전트가 없다', tone: 'dim' }])
   else out.push(head(`실행 중 ${running.length}`))
   if (runs.length && !running.length) out.push([{ text: '  지금 실행 중인 에이전트가 없다', tone: 'dim' }])
   const draw = (r: Run) => {
-    const tone: Tone = r.status === 'running' ? 'accent' : r.status === 'completed' ? 'ok' : r.status === 'idle' ? 'dim' : 'err'
-    const sym = r.status === 'running' ? '●' : r.status === 'completed' ? '✓' : r.status === 'idle' ? '◌' : '✗'
+    const done = retired(snap, r)
+    const tone: Tone = r.status === 'running' ? 'accent' : r.status === 'completed' || done ? 'ok' : r.status === 'idle' ? 'dim' : 'err'
+    const sym = r.status === 'running' ? '●' : r.status === 'completed' || done ? '✓' : r.status === 'idle' ? '◌' : '✗'
+    const round = poolRound(snap, r)
     out.push([
       { text: `${sym} `, tone },
       { text: pad(r.role, 12), bold: true },
-      { text: r.task ? `${r.task} ${POOL_LABEL[r.pool ?? ''] ?? r.pool} #${r.attempt}` : '미연결(marker 없음)', tone: r.task ? 'plain' : 'warn' },
-      { text: ` · ${r.status === 'idle' ? '일 끝남(대기) · ' : ''}${fmtDur((r.endedMs ?? now) - r.startedMs)} · 도구 ${r.tools}${r.errors ? ` · 오류 ${r.errors}` : ''}${r.tokens !== null ? ` · ${Math.round(r.tokens / 1000)}k tok` : ''}`, tone: 'dim' },
+      { text: r.task ? `${r.task} ${POOL_LABEL[r.pool ?? ''] ?? r.pool}${round && round > 1 ? ` ${round}회차` : ''}` : '미연결(marker 없음)', tone: r.task ? 'plain' : 'warn' },
+      { text: ` · ${done ? '작업 끝남(팀원 대기) · ' : r.status === 'idle' ? '일 끝남(대기) · ' : ''}${fmtDur((r.endedMs ?? now) - r.startedMs)} · 도구 ${r.tools}${r.errors ? ` · 오류 ${r.errors}` : ''}${r.tokens !== null ? ` · ${Math.round(r.tokens / 1000)}k tok` : ''}`, tone: 'dim' },
     ])
     out.push([{ text: `    ${r.lastTool || r.description}`, tone: 'dim' }])
     if (expanded === r.agentId) {
@@ -785,10 +907,9 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
     }
   }
   running.slice(0, 20).forEach(draw)
-  if (rest.length) {
-    const c = doneCounts(runs)
-    out.push(head(`대기 ${c.idle} · 끝남 ${c.ended}${showDone ? '' : ' (접힘)'}`))
-    if (showDone) rest.slice(0, 20).forEach(draw)
+  if (g.idle.length || g.ended.length) {
+    out.push(head(`대기 ${g.idle.length} · 끝남 ${g.ended.length}${showDone ? '' : ' (접힘)'}`))
+    if (showDone) [...g.idle, ...g.ended].slice(0, 20).forEach(draw) // 대기(다시 쓰일 수 있는 것) 먼저
   }
   const missing = unobservedHolders(snap, runs)
   if (missing.length) {

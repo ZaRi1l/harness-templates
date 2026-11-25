@@ -9,7 +9,7 @@
 ## 흐름
 ```mermaid
 flowchart TD
-    T["템플릿 + 설계 문서<br/>또는 기존 프로젝트에 이식"] -->|"처음 한 번"| BS["manager: 시작 준비 (asterbraid-bootstrap)<br/>(git init) · CLAUDE.md · verify.config · .gitignore 채우기·합치기<br/>→ 확인 → integration · 기준선 테스트 · sched init"]
+    I["사용자: asterbraid.py install<br/>(새 프로젝트 · 기존 프로젝트)"] -->|"처음 한 번"| BS["manager: 시작 준비 (asterbraid-bootstrap)<br/>(git init) · CLAUDE.md TODO · verify.config · .gitignore 채우기<br/>→ 확인 → integration · 기준선 테스트 · sched init"]
     BS --> M
     U["사용자"] <-->|"대화 · 결정"| M["manager<br/>판단 · 설명 · 조정"]
     U -.->|"관제 · 승인 · 결정 버튼"| P["asterbraid-dashboard<br/>Pane · /asterbraid"]
@@ -52,14 +52,17 @@ flowchart TD
 | 조사·설계만 하는 작업 | 없음 | `sched done ID --close --notes …`로 구현 없이 완료 |
 | 정리 | `sched cleanup` | + `--dry-run`으로 지울 worktree·브랜치 목록을 먼저 보인다 |
 | 의존 바꾸기 | 없음(취소·재등록) | `sched deps ID --set A,B`(구현 시작 전, 순환 검사). 승인된 미리보기가 있는 작업은 `cancel --force` 없이 취소되지 않는다 |
-| 기존 프로젝트 | 직접 준비 | 이식하면 시작 준비가 기존 파일을 살려 합치고, 기준선 테스트를 먼저 확인한다 |
+| 기존 프로젝트 | 직접 준비 | `asterbraid.py install`이 기존 파일을 살려 합치고, 시작 준비가 기준선 테스트를 먼저 확인한다 |
 | 필요한 것 | Claude Code | Claude Code 2.1.331에서 검증(Mods API는 early access) |
 
 고르는 법: Mods를 쓸 수 없거나 화면 없이 안정적인 엔진만 필요하면 `autonomous-parallel-dev`. 사용자가 대화하며 진행을 지켜보고 결정·검토를 자주 해야 하면 이 템플릿.
 
 ## 구성
 ```
-CLAUDE.md                                   규칙 (TODO 채우기)
+asterbraid.py                               설치·업데이트·점검 (템플릿에서 실행, 프로젝트에 복사되지 않는다)
+CLAUDE.md                                   프로젝트 규칙 (TODO 채우기, 끝에 @.claude/asterbraid.md)
+.claude/asterbraid.md                       하네스 규칙 (update가 바꾼다)
+.claude/asterbraid.lock.json                설치한 파일 해시 (설치 때 생긴다)
 .claude/settings.json                       권한, Hook, Mod 켜기(enabledPlugins)
 .claude/hooks/sched.py                      스케줄러 (+ 스냅샷·결정·일시 중지·우선순위·경고)
 .claude/hooks/integrate.py                  통합 엔진 (+ 결정 대기 거부, 통합 뒤 스냅샷)
@@ -69,7 +72,7 @@ CLAUDE.md                                   규칙 (TODO 채우기)
 .claude/skills/asterbraid-dashboard/        관제 Mod (Claude Code 플러그인, 자동 로드)
 .claude/skills/preview-workflow/            미리보기 제작·등록·검토 절차 스킬
 .claude/skills/architecture-design/         설계 깊이별 design.md 형식·규칙 (deep 점검표는 references/)
-.claude/skills/asterbraid-bootstrap/           시작 준비 절차와 verify.config.json 키 설명 (manager가 처음 한 번 부른다)
+.claude/skills/asterbraid-bootstrap/        시작 준비 절차와 verify.config.json 키 설명 (manager가 처음 한 번 부른다)
 .claude/previewUI/preview.html              미리보기 대시보드 화면 소스
 ```
 AI 도구의 소스·설정은 모두 `.claude/`에, 실행 중에 생기는 상태·결과물은 `.git/claude-auto/`에 둔다(저장소 밖이라 커밋되지 않는다).
@@ -79,22 +82,38 @@ AI 도구의 소스·설정은 모두 `.claude/`에, 실행 중에 생기는 상
 Mod를 `.claude/mods/`가 아니라 `.claude/skills/`에 두는 것은 Claude Code가 프로젝트에서 자동으로 읽는 플러그인 위치가 `.claude/skills/<이름>/`뿐이어서다(`.claude/plugins/`도 읽지 않는다).
 
 ## 사용법
-1. `CLAUDE.md`와 `.claude/`를 프로젝트 폴더에 복사하고, 설계·요구사항 문서를 넣는다(예: `docs/design.md`). git 저장소가 아니어도 된다(manager가 `git init`한다).
-2. **저장소 루트에서** `claude --agent manager`로 연다. 처음이면 작업 폴더 신뢰를 승인한다. Mod는 `--plugin-dir` 없이 로드된다
-   (`/plugin` Installed 탭에 `asterbraid-dashboard@skills-dir`. 넓은 터미널이면 Pane이 자동으로 열린다).
-3. 설계 문서를 주고 진행을 맡긴다. 처음 한 번 manager가 **시작 준비**를 한다:
-   문서를 보고 `CLAUDE.md`의 TODO·`verify.config.json`(테스트 명령 등)·`.gitignore`를 채울 내용을 요약해 확인받고,
-   적용하고 `integration` 브랜치로 바꾼 뒤 커밋하고(`main`에는 커밋하지 않는다) `sched init`한다. 설계 결정은 그다음 `sched decide`로 연다. `verify.config.json` 수정은 승인 창이 한 번 뜬다.
+`asterbraid.py`는 템플릿에 두고, 설치할 프로젝트 폴더를 가리켜 실행한다(`uv` 대신 `python`도 된다).
+`--apply` 없이는 바꿀 내용만 보여 준다. 상대 경로는 명령을 실행한 폴더 기준이다.
+```
+# 템플릿 저장소에서 실행 (프로젝트 폴더를 가리킨다)
+cd <템플릿 위치>
+uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더>          # 미리보기
+uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더> --apply  # 적용
+
+# 프로젝트 폴더에서 실행 (현재 폴더 = .)
+cd <프로젝트 폴더>
+uv run --no-project python <템플릿 위치>/asterbraid/asterbraid.py install . --apply
+
+# 그 밖의 명령 (위 두 방법 모두 같다)
+… asterbraid.py update <프로젝트 폴더> --apply   # 템플릿 새 버전 반영(직접 고친 파일은 남긴다)
+… asterbraid.py check  <프로젝트 폴더>           # 설치 상태 점검
+```
+- 하네스 파일(agents·hooks·skills·`.claude/asterbraid.md`)은 복사한다. 같은 이름의 다른 파일이 있으면 덮지 않고 알린다.
+- `settings.json`은 기존 값을 두고 하네스 권한·Hook·Mod만 더한다. `.gitignore`는 빠진 줄만, 기존 `CLAUDE.md`는 끝에 `@.claude/asterbraid.md` 한 줄만 더한다.
+- `update`는 직접 고치지 않은 하네스 파일만 바꾼다. 프로젝트 설정(`verify.config.json`, `auto.config.json`)은 건드리지 않는다.
+- 프로젝트에서 Claude에게 "asterbraid로 설치해줘"라고 해도 된다(설정을 바꾸는 단계라 승인 창이 뜰 수 있다).
+
+설치 뒤:
+1. 설계·요구사항 문서를 넣거나(예: `docs/design.md`) 대화로 준다. git 저장소가 아니어도 된다(manager가 `git init`한다).
+   기존 프로젝트면 커밋하지 않은 변경은 커밋하거나 치워 둔다(시작 준비는 섞인 변경을 커밋하지 않고 묻는다).
+2. Claude 세션을 새로 열어 **저장소 루트에서** `claude --agent manager`로 시작한다. 처음이면 작업 폴더 신뢰를 승인한다.
+   Mod는 `--plugin-dir` 없이 로드된다(`/plugin` Installed 탭에 `asterbraid-dashboard@skills-dir`. 넓은 터미널이면 Pane이 자동으로 열린다).
+3. 처음 한 번 manager가 **시작 준비**를 한다: 문서·코드를 보고 `CLAUDE.md`의 TODO·`verify.config.json`(테스트 명령 등)·`.gitignore` 언어별 줄을
+   채울 내용을 요약해 확인받고, `integration` 브랜치로 바꾼 뒤 커밋하고(`main`에는 커밋하지 않는다), 현재 코드로 전체 테스트를 한 번 돌린 뒤 `sched init`한다.
+   기존 테스트가 실패하면 통합이 모두 막히므로 먼저 고칠지 결정을 받는다. 설계 결정은 그다음 `sched decide`로 연다.
 
 그 뒤 진행은 Pane에서 보고, 결정·검토가 필요하면 manager가 묻는다. 끝나면 `integration`을 확인하고 `main`에 직접 반영한다.
-직접 채우고 싶으면 시작 전에 TODO·`verify.config.json`·`.gitignore`를 채우고 `git switch -c integration`해 두면 manager가 준비를 건너뛴다.
-
-### 진행 중인 프로젝트에 이식
-1. 템플릿의 `.claude/`를 복사한다. 이미 `.claude/settings.json`·`CLAUDE.md`·`.gitignore`가 있으면 **덮어쓰지 말고** 템플릿 쪽을
-   `*.harness` 같은 이름으로 옆에 둔다(시작 준비에서 manager가 둘을 합친 안을 보여 확인받는다). `.claude/agents/` 이름이 겹치면 미리 정리한다.
-2. 커밋하지 않은 변경은 커밋하거나 치워 둔다(시작 준비는 섞인 변경을 커밋하지 않고 묻는다).
-3. 요구(추가할 기능)를 문서로 주거나 대화로 준다. 시작 준비가 코드에서 언어·테스트 도구를 읽고, `sched init` 전에 현재 코드로 전체 테스트를 한 번 돌린다.
-   기존 테스트가 실패하면 통합이 모두 막히므로, 먼저 고칠지 결정을 받는다.
+직접 채우고 싶으면 시작 전에 TODO·`verify.config.json`을 채우고 `git switch -c integration`해 두면 manager가 준비를 건너뛴다.
 
 Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-dashboard@skills-dir": false}}`. 개발 기능은 그대로 돈다.
 한 세션만 다른 폴더의 Mod로 열려면 `claude --agent manager --plugin-dir ./.claude/skills/asterbraid-dashboard`.
@@ -103,7 +122,8 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
 ```
  ✦ ASTERBRAID shop · integration 3f2a1c9                      ✧ 실시간 · 변화 2m00s 전
  진행 ████░░░░░░░░░░ 4/12 완료 33% (작업 수 기준)
- 실행 3 · 배정 4 · 검증 1 · 통합 대기 0 · 실행 미확인 1
+ 실행 3 · 배정 4 · 검증 1 · 통합 대기 0 · 실행 미확인 1 · 컨텍스트 41%
+ ☾ 자리 비움 중 · 미리보기 자동 승인  → 7 명령 탭에서 복귀
  ▶ 사용자 차례: 미리보기 승인 1 · 결정 1  → 4 승인·결정 탭
  ⚠ implementer API-2 12m00s째 도구 호출 없음
  ─────────────────────────────────────────────────────────────────────────────────────
@@ -114,23 +134,23 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
  ── manager · strategy · PAY-1 ────────────────────────────────────────────────────────
  결제 API를 먼저 통합하고 화면은 승인 뒤 시작한다
 ```
-- 머리말(위 다섯 줄)은 모든 탭 위에 있다. 오른쪽 위 별(· ✧ ✦ ✧)은 Mod가 스냅샷 파일을 확인할 때마다(기본 2초) 한 칸씩 반짝인다.
+- 머리말은 모든 탭 위에 있다. 오른쪽 위 별(· ✧ ✦ ✧)은 Mod가 스냅샷 파일을 확인할 때마다(기본 1초, 명령 탭 `갱신 − +`) 한 칸씩 반짝인다.
   숫자가 그대로여도 표시가 돌면 자동 갱신은 살아 있고, 스케줄러 상태가 바뀌지 않은 것이다. "변화"는 스냅샷이 마지막으로 바뀐 때다.
 - 레이아웃: 프롬프트 위 inline이면 **mini**(두 줄 요약), 도킹 폭 100칸 이상이면 **wide**(표 옆에 에이전트 열), 아니면 **compact**. 한글은 2칸으로 재서 자른다.
 - 상태는 색과 함께 기호(✓ ● ◎ ? ✗ ↻ ⇢ ⏸ ⚠)와 글자로 보인다. 완료율은 작업 수 기준이며 공수 진행률이 아니다.
 - "실행"은 이 세션에서 본 실제 서브에이전트, "배정"은 sched.py의 슬롯 점유다. 둘이 다르면 "실행 미확인"으로 표시한다.
 - 스냅샷을 못 읽으면 이전 화면을 두고 "갱신 실패"와 사유를 보인다. 읽기 실패를 작업 실패·완료로 바꾸지 않는다.
-- 상태 줄: `자율 완료 4/12 · 실행 3/배정 4 · 답 필요 2 · 경고 1`.
+- 상태 줄: `자율 완료 4/12 · 실행 3/배정 4 · 답 필요 2 · 경고 1`. 컨텍스트 %는 메인 세션(manager) 값이고 80% 이상이면 경고 색이다. Mod는 모델을 부르지 않아 토큰을 쓰지 않는다.
 
 | 탭 | 내용 |
 |---|---|
-| 현황 | 작업 표(상태·단계·담당 에이전트와 경과 또는 기다리는 이유), manager 설명, 병목, 최근 변화 |
-| 작업 | 목록(상태·우선순위·위험도·재시도, 기다리는 이유, 의존 작업, 필터, 누르면 담당 경로·완료 기준) / 타임라인(기록된 시작·끝 시각으로 그린 레인) |
-| 에이전트 | 관측한 에이전트(역할, 작업·풀·시도, 시간, 도구 수, 오류, 토큰, 마지막 도구), 실행 미확인 작업 |
-| 승인·결정 | 검토 대기 미리보기(열기·승인·수정 요청 입력), 열린 결정(선택지·장단점·추천·선택 버튼). 기다리는 수가 탭 이름 옆에 붙는다 |
+| 현황 | 진행 중 작업 표(상태·단계·담당 에이전트와 경과 또는 기다리는 이유, 완료는 개수만), manager 설명, 병목, 최근 변화 |
+| 작업 | 목록(진행 중·대기·보류 위, 완료·취소는 접힘. 펼치면 최근 20개와 걸린 시간·토큰. 작은 변경은 `작게`. 누르면 담당 경로·완료 기준) / 타임라인 |
+| 에이전트 | 실행 중 → 대기(다시 쓰일 수 있는 팀원) → 끝남(끝났거나, 작업과 그 작업에 기대는 작업이 모두 끝난 팀원) 순. 역할, 작업·단계·회차, 시간, 도구 수, 오류, 토큰, 마지막 도구, 실행 미확인 작업 |
+| 승인·결정 | 자리 비운 동안 자동으로 정한 것([이대로 둠]·[다시 정하기]), 검토 대기 미리보기(열기·승인·수정 요청 입력 → 한 번 더 확인), 열린 결정(선택지·장단점·추천·선택 버튼) |
 | 통합·지표 | 통합 브랜치 HEAD, 작업 브랜치와 검증 수, 통합 대기열, 최근 통합 결과, 스케줄러 지표와 Mod 관측(동시 실행, 토큰, 세션 비용 추정) |
 | 활동 | 상태 변화, 통합 결과, 결정, 에이전트 시작·끝, 도구 거부, 경고. 오류·경고만 보기 |
-| 명령 | 명령을 치지 않고 버튼으로: 새로고침, 브라우저 대시보드, 배치 바꾸기, Pane 닫기, 새 배정 일시 중지·재개, 풀별 동시 실행 한도 −/+, 작업 우선순위 ▲/▼. 아래에 같은 일을 하는 `/asterbraid` 명령을 보인다 |
+| 명령 | 버튼으로: 새로고침, 브라우저 대시보드, 배치, Pane 닫기, 갱신 간격 −/+, 자리 비움·복귀, 새 배정 일시 중지·재개, 풀별 동시 실행 한도 −/+, 작업 우선순위 ▲/▼. 아래에 같은 일을 하는 `/asterbraid` 명령 |
 
 ## 명령 (`/asterbraid`)
 모델을 부르지 않고 바로 실행된다(manager가 응답하는 중에도).
@@ -145,6 +165,8 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
 | `decide D-1 A [메모]` | 결정 기록 |
 | `pause [사유]` / `resume`, `limit POOL N`, `priority ID N` | 새 배정 멈춤·재개, 슬롯, 우선순위 |
 | `unblock ID` | 보류 해제(sched.py가 재작업·준비 상태로 되돌린다). 작업 탭에서 보류된 작업을 펼쳐 버튼으로도 한다 |
+| `away [previews]` / `back` | 자리 비움 켜기(미리보기 자동 승인 포함) / 복귀 |
+| `rate 1\|2\|5\|10` | 화면 갱신 간격(초). 고른 값은 다음 세션에도 남는다 |
 
 브라우저는 Windows `explorer.exe`(PATH에 없으면 `C:\Windows\explorer.exe`), macOS `open`, Linux `xdg-open`으로 연다(셸 없이). 열 수 없으면 사유와 전체 파일 경로를 알려 준다.
 
@@ -152,6 +174,12 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
 manager가 중요한 선택을 만나면 결정을 열고(`sched decide add`, 선택지·장단점·추천·이유·영향 작업), `AskUserQuestion`으로 묻는다.
 사용자는 대화로 답하거나 Pane에서 선택지를 누른다. 실제 응답만 기록되고(`--by user|tui`), 이미 응답한 결정은 바꿀 수 없다(새 결정을 연다).
 대시보드 HTML에도 열린 결정과 응답이 보인다.
+
+### 자리 비움 (밤새 맡길 때)
+명령 탭의 [자리 비움] 또는 [자리 비움 + 미리보기 자동 승인]을 누르고 자리를 비운다(`sched away [--previews]`).
+- 그동안 manager는 ui·ux·direction·architecture·requirements 결정을 추천안으로 정하고(`decide adopt`, `by away`) 계속한다. `--previews`면 최신 미리보기도 승인한다.
+- 의존성·호환 깨짐·환경·데이터·한도 결정은 프로그램이 거부해 사용자를 기다린다. 그 결정에 묶이지 않은 작업은 계속된다.
+- [복귀]를 누르면 승인·결정 탭 맨 위에 자리 비운 동안 정한 것이 나온다. [이대로 둠] 또는 [다시 정하기](같은 선택지로 결정을 다시 연다. 이미 끝난 작업은 manager가 후속 작업으로 고친다).
 
 ## 미리보기 승인
 - designer가 `preview-workflow` 절차로 한 파일 HTML을 만들고 `sched preview`로 등록한다. 버전마다 `previews/<ID>/vN.html`과 SHA-256이 남는다.
@@ -172,6 +200,7 @@ manager가 중요한 선택을 만나면 결정을 열고(`sched decide add`, �
 | `reports/` | manager | 끝 보고(결과, 결정, 남은 위험, 사용자가 할 일) |
 
 파일 이름은 `YYYY-MM-DD-HHMM-<작업 ID 또는 주제>.md`, 첫머리에 작성 시각·작성자·출처·관련 작업과 결정. 서브에이전트는 쓰기만 하고 manager가 바로 `docs(asterbraid): …`로 커밋한다.
+요구 문서 첫머리에 `상태: 진행 중 | 일부 완료(남은 것) | 구현 완료 — 통합 커밋`과 기능별 표를 두고, `docs/asterbraid/INDEX.md`에 문서 목록과 상태를 둔다(manager가 고친다).
 옛 문서는 지우지 않는다. 새 문서가 대신하면 옛 문서 첫머리에 `대체됨: <새 파일>`을 적어, 에이전트가 옛 계약을 최신으로 읽지 않게 한다.
 문서만 바뀌면 테스트를 돌리지 않는다(`verify.config.json`의 `ignored_prefixes`의 `docs/`). 미리보기 HTML과 상태·결정·검증 기록은 지금처럼 `.git/claude-auto/`와 `sched`에 둔다(해시로 승인하고 프로그램이 검사한다).
 요구를 대화로 줄 때는 "지금 얘기한 걸 requirements로 정리해서 보여 주고, 확인받은 다음에 진행해줘"라고 하면 된다.

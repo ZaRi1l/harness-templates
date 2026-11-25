@@ -30,6 +30,8 @@
 | 미리보기 격리 | `sandbox="allow-scripts"` iframe | 미리보기 코드가 부모 페이지·승인 흐름에 닿지 않는다 |
 | designer 스킬 | `preview-workflow`만 미리 불러오고, 디자인 스킬은 있으면 `Skill`로 | 외부 스킬이 없는 환경에서도 동작. 이름이 설치 방법마다 달라 미리 불러오기가 깨진다 |
 | 시작 준비 | (절차는 `asterbraid-bootstrap` 스킬, 처음 한 번만 불러 manager 프롬프트를 가볍게 둔다) 템플릿 + 설계 문서만 넣으면 manager가 `CLAUDE.md` TODO·`verify.config.json`·`.gitignore`를 채워 확인받고, 커밋·`integration` 생성·`sched init` | 사람이 기억해야 하는 수동 단계를 없앤다. 테스트 명령·검토 기준은 설계 문서에서 나오므로 문서를 읽는 manager가 채우는 것이 정확하다. 테스트 설정 수정은 승인 창으로 사람이 한 번 본다 |
+| 설치·업데이트 (2026-11-25) | 사용자가 `asterbraid.py install`·`update`·`check`를 실행한다. 하네스 파일은 복사·해시 기록, settings.json은 JSON 단위로 더하기만, 기존 CLAUDE.md는 끝에 `@.claude/asterbraid.md` 한 줄. 하네스 규칙은 `.claude/asterbraid.md`로 분리 | e2e4: manager가 이식 중 settings.json을 합치려다 권한 분류기에 두 번 막혀 Hook·push 거부 없이 끝까지 돌았다(에이전트가 자기 권한을 고치는 일). 사람이 실행하는 프로그램은 막히지 않고, 해시로 사용자가 고친 파일을 지키며 템플릿 새 버전을 반영할 수 있다 |
+| 자리 비움 (2026-11-25) | `sched away [--previews]`/`back`. 자리 비움 중에만 ui·ux·direction·architecture·requirements 결정을 추천안으로 `decide adopt`(by away), `--previews`면 최신 미리보기 `approve --by away`. 복귀하면 `away-review`로 그대로 둠/다시 정하기 | 사용자가 밤새 맡긴다. 시한 대신 미리 위임 범위를 정하면 깨어 있을 때와 규칙이 같고, 의존성·호환 깨짐·환경·데이터는 여전히 사람이 정한다 |
 | 직접 git 권한 | `git merge`·`git worktree remove` 허용, rebase·`reset --hard`·`branch -D`·`remote`는 승인 필요 | 실제 사용에서 승인 요청이 자동 루프를 멈췄다(사용자 경험). 프로그램 경유 병합은 원래 규칙과 무관하고, 직접 병합 금지는 지침으로 남는다 |
 | 일시 중지 | 새 `start`만 거부. 실행 중 에이전트·검증·통합은 계속 | 에이전트를 강제로 멈추는 API가 스케줄러에 없고, 반쯤 한 작업을 버리지 않는다 |
 | 이상 감지 | 긴 단계는 `sched.py`(과거 중앙값 3배·10분·표본 3), 멈춤·연속 실패·유령 슬롯은 Mod. 경고만 한다 | 상주 LLM 감독관보다 싸고 재현된다. 원인 판단은 manager 하나만 한다 |

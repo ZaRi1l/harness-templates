@@ -274,6 +274,102 @@ class TestCleanupDryRun(ModsCase):
         self.assertEqual(self.ok("cleanup")["A"], {"cleaned": True})  # 그다음 실제 정리
         self.assertFalse(wa.exists())
 
+    def test_closed_task_without_commit_does_not_crash(self):
+        """e2e4: 문서만 남기고 닫은 작업(head 없음)이 있으면 인자 없는 cleanup이 traceback으로 멈췄다."""
+        note = self.repo.path / "notes" / "ENV.md"
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text("# 결과\n", encoding="utf-8")
+        self.add("ENV", profile="research", paths="docs/env.md")
+        self.ok("start", "ENV", "--pool", "research", "--agent", "r")
+        self.ok("done", "ENV", "--close", "--notes", "notes/ENV.md")
+        self.assertEqual(self.ok("cleanup", "--dry-run")["ENV"]["would_remove"], {"worktree": None, "branches": []})
+        self.assertEqual(self.ok("cleanup")["ENV"], {"cleaned": True})
+        self.assertTrue(self.state("ENV")["cleaned"])
+
+
+class TestAwayMode(ModsCase):
+    """4-5: 밤새 맡길 때 사용자가 미리 위임한 범위(화면·방향 결정, 원하면 미리보기)만 추천안으로 정한다."""
+
+    def decide(self, did="D-1", kind="ux", tasks="UI", recommend="A"):
+        args = ["decide", "add", "--id", did, "--title", "레이아웃", "--question", "어느 안?", "--tasks", tasks,
+                "--option", "A: 카드", "--option", "B: 표", "--kind", kind, "--why", "모바일 비중"]
+        if recommend:
+            args += ["--recommend", recommend]
+        return self.ok(*args)
+
+    def test_adopt_only_while_away_and_for_delegated_kinds(self):
+        self.add("UI", paths="ui/")
+        self.decide()
+        self.assertIn("자리 비움", self.refused("decide", "adopt", "D-1"))
+        self.ok("away")
+        self.assertEqual(self.snapshot()["away"]["previews"], False)
+        d = self.ok("decide", "adopt", "D-1")
+        self.assertEqual((d["state"], d["choice"], d["by"]), ("ANSWERED", "A", "away"))
+        for kind in ("dependency", "breaking", "environment", "data", "limit", "other"):
+            with self.subTest(kind=kind):
+                self.decide(f"D-{kind}", kind=kind)
+                self.assertIn("위임", self.refused("decide", "adopt", f"D-{kind}"))
+        self.decide("D-none", recommend="")
+        self.assertIn("추천", self.refused("decide", "adopt", "D-none"))
+        self.assertIn("adopt", self.refused("decide", "answer", "D-none", "--choice", "A", "--by", "away"))
+
+    def test_preview_auto_approval_needs_previews_flag(self):
+        self.preview_ready()
+        self.assertIn("자리 비움", self.refused("approve", "UI", "--by", "away"))
+        self.ok("away")
+        self.assertIn("--previews", self.refused("approve", "UI", "--by", "away"))
+        self.ok("away", "--previews")
+        self.assertEqual(self.ok("approve", "UI", "--by", "away")["state"], "READY")
+        self.assertEqual(self.state("UI")["preview"]["approval"]["by"], "away")
+
+    def test_back_lists_what_was_decided_and_user_can_keep_or_redo(self):
+        self.preview_ready()
+        self.add("API", paths="api/")
+        self.decide("D-1")
+        self.decide("D-2", tasks="API")
+        self.ok("away", "--previews")
+        self.ok("decide", "adopt", "D-1")
+        self.ok("decide", "adopt", "D-2")
+        self.ok("approve", "UI", "--by", "away")
+        back = self.ok("back")
+        self.assertEqual(sorted(x["key"] for x in back["auto"]), ["D-1", "D-2", "UI"])
+        snap = self.snapshot()
+        self.assertIsNone(snap["away"])
+        self.assertEqual(len([x for x in snap["away_log"] if x["reviewed"] is None]), 3)
+        self.ok("away-review", "D-1", "--keep")
+        out = self.ok("away-review", "D-2", "--redo")
+        self.assertEqual(out["reopened"], "D-2-r1")
+        new = next(x for x in self.snapshot()["decisions"] if x["id"] == "D-2-r1")
+        self.assertEqual((new["state"], new["tasks"], [o["key"] for o in new["options"]]), ("OPEN", ["API"], ["A", "B"]))
+        self.assertIn("D-2-r1", self.refused("start", "API", "--pool", "implement", "--agent", "i"))
+        self.assertIn("미리보기", self.refused("away-review", "UI", "--redo"))
+        self.ok("away-review", "UI", "--keep")
+        self.assertIn("이미", self.refused("away-review", "D-1", "--keep"))
+        self.assertEqual([x for x in self.snapshot()["away_log"] if x["reviewed"] is None], [])
+
+
+class TestSettingsWarning(ModsCase):
+    """e2e4 N1: 하네스 settings.json 없이(Hook·push 거부 없이) 끝까지 돌았다. status가 알려야 한다."""
+
+    def test_status_warns_when_harness_hooks_missing(self):
+        self.assertNotIn("asterbraid.py check", self.ok("status"))
+        (self.repo.path / ".claude/settings.json").write_text('{"permissions": {"allow": []}}', encoding="utf-8")
+        self.assertIn("asterbraid.py check", self.ok("status"))
+        self.assertTrue(self.ok("status", "--json")["warnings"])
+
+
+class TestTaskTiming(ModsCase):
+    """4-12: Mod가 완료 작업의 걸린 시간을 보이도록 스냅샷에 첫 배정 시각을 둔다."""
+
+    def test_snapshot_has_first_start(self):
+        self.add("A")
+        self.assertIsNone(self.task(self.snapshot(), "A")["started"])
+        self.ok("start", "A", "--pool", "implement", "--agent", "i")
+        first = self.state("A")["history"][-1]["at"]
+        self.ok("fail", "A", "--reason", "다시")
+        self.ok("start", "A", "--pool", "implement", "--agent", "i")
+        self.assertEqual(self.task(self.snapshot(), "A")["started"], first)
+
 
 class TestPreviewContract(ModsCase):
     def test_approve_checks_version_and_hash(self):
@@ -448,7 +544,8 @@ class TestAgentSkills(unittest.TestCase):
     def test_ai_docs_folder_is_committed_and_skips_tests(self):
         """AI 문서는 docs/asterbraid/에 커밋하고(worktree에서 보이게), 문서만 바뀌면 테스트를 돌리지 않는다."""
         root = self.CLAUDE.parent
-        rules = (root / "CLAUDE.md").read_text(encoding="utf-8")
+        rules = (self.CLAUDE / "asterbraid.md").read_text(encoding="utf-8")  # 하네스 규칙(CLAUDE.md가 가져온다)
+        self.assertIn("@.claude/asterbraid.md", (root / "CLAUDE.md").read_text(encoding="utf-8"))
         for folder in ("requirements/", "research/", "design/", "reports/"):
             self.assertIn(f"`{folder}`", rules)
         for agent, folder in (("manager", "requirements/"), ("researcher", "research/"), ("architect", "design/")):
@@ -519,6 +616,98 @@ class TestBootstrap(unittest.TestCase):
         manager = self.bootstrap_text()
         keys = set(json.loads((self.TEMPLATE / ".claude/hooks/verify.config.json").read_text(encoding="utf-8"))) - {"_comment"}
         self.assertEqual(sorted(k for k in keys if f"`{k}`" not in manager), [])
+
+
+class TestInstaller(unittest.TestCase):
+    """N10: 사용자가 실행하는 설치·업데이트 프로그램. 에이전트가 자기 권한 설정을 고치지 않게 한다(e2e4 N1)."""
+    TEMPLATE = Path(base.__file__).resolve().parent.parent / MODS
+
+    def setUp(self):
+        import tempfile
+        from helpers import rmtree
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(rmtree, self.tmp)
+        self.target = self.tmp / "프로젝트"
+        self.target.mkdir()
+
+    def run_tool(self, *args, template=None):
+        script = (template or self.TEMPLATE) / "asterbraid.py"
+        return subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, encoding="utf-8")
+
+    def ok(self, *args, **kw):
+        r = self.run_tool(*args, **kw)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r.stdout
+
+    def settings(self):
+        return json.loads((self.target / ".claude/settings.json").read_text(encoding="utf-8"))
+
+    def test_fresh_install_dry_run_then_apply_then_check(self):
+        plan = self.ok("install", str(self.target))
+        self.assertIn("--apply", plan)
+        self.assertEqual(list(self.target.iterdir()), [])  # 미리보기만
+        self.assertIn("세션을 다시", self.ok("install", str(self.target), "--apply"))
+        for rel in (".claude/agents/manager.md", ".claude/hooks/sched.py", ".claude/asterbraid.md",
+                    ".claude/skills/asterbraid-dashboard/.claude-plugin/plugin.json", ".claude/hooks/verify.config.json",
+                    "CLAUDE.md", ".claude/asterbraid.lock.json"):
+            self.assertTrue((self.target / rel).is_file(), rel)
+        self.assertEqual(self.settings(), json.loads((self.TEMPLATE / ".claude/settings.json").read_text(encoding="utf-8")))
+        self.assertIn(".playwright-cli/", (self.target / ".gitignore").read_text(encoding="utf-8"))
+        self.ok("check", str(self.target))
+        self.assertIn("update", self.run_tool("install", str(self.target)).stderr)  # 두 번 설치하지 않는다
+
+    def test_existing_project_keeps_its_files_and_merges_settings(self):
+        (self.target / "CLAUDE.md").write_text("# 내 프로젝트\n\n- 내 규칙\n", encoding="utf-8")
+        (self.target / ".gitignore").write_text("node_modules/\n.claude/worktrees/", encoding="utf-8")
+        (self.target / ".claude/agents").mkdir(parents=True)
+        (self.target / ".claude/agents/manager.md").write_text("내 manager\n", encoding="utf-8")
+        mine = {"permissions": {"allow": ["Bash(npm test)"], "deny": ["Read(secret/**)"]},
+                "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo hi"}]}]}, "env": {"X": "1"}}
+        (self.target / ".claude/settings.json").write_text(json.dumps(mine), encoding="utf-8")
+        self.ok("install", str(self.target), "--apply")
+        claude = (self.target / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertTrue(claude.startswith("# 내 프로젝트\n\n- 내 규칙\n"))
+        self.assertEqual(claude.count("@.claude/asterbraid.md"), 1)
+        self.assertEqual((self.target / ".claude/agents/manager.md").read_text(encoding="utf-8"), "내 manager\n")
+        s = self.settings()
+        self.assertEqual(s["permissions"]["allow"][0], "Bash(npm test)")
+        self.assertIn("Bash(git push *)", s["permissions"]["deny"])
+        self.assertIn("Read(secret/**)", s["permissions"]["deny"])
+        self.assertEqual(len(s["hooks"]["Stop"]), 2)
+        self.assertEqual(s["env"]["X"], "1")
+        lines = (self.target / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines.count(".claude/worktrees/"), 1)
+        self.assertIn(".claude/settings.local.json", lines)
+        r = self.run_tool("check", str(self.target))
+        self.assertNotEqual(r.returncode, 0)  # manager.md가 하네스 것이 아니다
+        self.assertIn("manager.md", r.stdout)
+        # 다시 돌려도 아무것도 늘지 않는다
+        before = {p: p.read_bytes() for p in self.target.rglob("*") if p.is_file()}
+        self.ok("update", str(self.target), "--apply")
+        self.assertEqual({p: p.read_bytes() for p in self.target.rglob("*") if p.is_file()}, before)
+
+    def test_update_replaces_only_untouched_harness_files(self):
+        import shutil
+        tpl = self.tmp / "tpl"
+        shutil.copytree(self.TEMPLATE, tpl)
+        self.ok("install", str(self.target), "--apply", template=tpl)
+        (self.target / ".claude/agents/verifier.md").write_text("내가 고침\n", encoding="utf-8")
+        (self.target / ".claude/hooks/verify.config.json").write_text("{}", encoding="utf-8")
+        for rel in (".claude/agents/manager.md", ".claude/agents/verifier.md", ".claude/hooks/verify.config.json"):
+            with (tpl / rel).open("a", encoding="utf-8") as fh:
+                fh.write("\n새 버전\n")
+        (tpl / ".claude/agents/researcher.md").unlink()
+        plan = self.ok("update", str(self.target), template=tpl)
+        self.assertIn("verifier.md", plan)
+        self.ok("update", str(self.target), "--apply", template=tpl)
+        self.assertTrue((self.target / ".claude/agents/manager.md").read_text(encoding="utf-8").endswith("새 버전\n"))
+        self.assertEqual((self.target / ".claude/agents/verifier.md").read_text(encoding="utf-8"), "내가 고침\n")
+        self.assertEqual((self.target / ".claude/hooks/verify.config.json").read_text(encoding="utf-8"), "{}")  # 프로젝트 설정
+        self.assertFalse((self.target / ".claude/agents/researcher.md").exists())
+
+    def test_refuses_template_itself(self):
+        self.assertNotEqual(self.run_tool("install", str(self.TEMPLATE)).returncode, 0)
+        self.assertNotEqual(self.run_tool("update", str(self.target)).returncode, 0)  # 설치 전
 
 
 class TestCommonCode(ModsCase):

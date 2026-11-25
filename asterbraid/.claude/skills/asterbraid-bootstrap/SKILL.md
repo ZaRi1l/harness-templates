@@ -1,23 +1,24 @@
 ---
 name: asterbraid-bootstrap
-description: asterbraid의 시작 준비(처음 한 번). 템플릿과 설계 문서만 있는 새 저장소, 또는 하네스를 이식한 기존 프로젝트에서 manager가 CLAUDE.md·verify.config.json·.gitignore를 채우고(기존 내용은 살린다), integration 브랜치를 만들고, 기준선 테스트를 확인하고, sched init까지 할 때 쓴다.
+description: asterbraid의 시작 준비(처음 한 번). 사용자가 asterbraid.py install로 하네스를 넣은 새 저장소나 기존 프로젝트에서 manager가 CLAUDE.md·verify.config.json·.gitignore를 채우고(기존 내용은 살린다), integration 브랜치를 만들고, 기준선 테스트를 확인하고, sched init까지 할 때 쓴다.
 ---
 
 # 시작 준비 (manager, 처음 한 번)
-사용자는 템플릿과 설계 문서만 넣고 시작하거나, 진행 중인 프로젝트에 템플릿을 이식한다. 나머지는 문서·코드를 보고 채운다. 아래에서 `sched`는 manager.md와 같다.
+사용자가 `asterbraid.py install`로 하네스 파일·settings.json·.gitignore 하네스 줄·CLAUDE.md import 줄을 이미 넣었다. 나머지는 문서·코드를 보고 채운다. 아래에서 `sched`는 manager.md와 같다.
 
 0. `git rev-parse --show-toplevel`. 실패하면(git 저장소가 아니면) 현재 폴더에서 `git init -b main`.
    결과가 현재 폴더와 다르면(다른 저장소의 하위 폴더) 그 저장소를 쓸지, 여기서 새로 `git init`할지 묻는다.
-   **이미 진행 중인 프로젝트에 이식한 경우**(코드·커밋 이력이 있다): 아래 2~4에서 기존 파일을 덮어쓰지 않는다.
-   기존 `CLAUDE.md`·`.claude/settings.json`·`.gitignore`가 있으면 기존 내용을 살리고 하네스에 필요한 항목만 더한 안을 보여 확인받는다.
+   `sched status`가 Hook 경고를 내거나 `.claude/asterbraid.lock.json`이 없으면 `.claude/settings.json`을 직접 고치지 않는다(권한 분류기가 막는다).
+   사용자에게 `uv run --no-project python <템플릿>/asterbraid/asterbraid.py install <이 폴더> --apply`(설치됐으면 `update`)와 세션 재시작을 안내하고 멈춘다.
+   기존 프로젝트(코드·커밋 이력이 있다)는 아래 2~4에서 기존 파일 내용을 지우지 않는다.
 1. 설계·요구사항 문서를 찾는다(사용자가 준 경로, 없으면 `docs/`·루트의 `*.md`). 없으면 README·코드·대화로 받는다.
    기존 프로젝트면 코드에서 언어·테스트 도구·디렉터리 구조를 읽어 채우고, 도메인 검토 기준이 비면 묻는다.
 2. 채울 값을 정한다. 문서에 없는 것만 묻는다.
-   - `CLAUDE.md`의 TODO: 프로젝트 설명, 현재 단계, 수정 금지 경로, 테스트 명령, 커밋 규칙, 도메인 검토 기준
+   - `CLAUDE.md`의 TODO: 프로젝트 설명, 현재 단계, 수정 금지 경로, 테스트 명령, 커밋 규칙, 도메인 검토 기준(기존 CLAUDE.md에 없는 절만 끝에 더한다)
      (테스트가 통과해도 틀릴 수 있는 이 프로젝트 고유 항목: 값의 범위·단위, 경계, 보안, 데이터 보존).
      커밋 규칙에 이 세션이 받은 attribution 줄(`Co-Authored-By: …`)을 옮겨 적지 않는다(클라이언트·모델마다 다르다).
    - `.claude/hooks/verify.config.json`: 아래 표. 언어와 테스트 도구는 설계 문서를 따른다.
-   - `.gitignore`: `.claude/settings.local.json`, `.claude/worktrees/`, 언어별 산출물(예: `__pycache__/`, `.no-pycache/`, `node_modules/`).
+   - `.gitignore`: 하네스 줄(`.claude/settings.local.json`, `.claude/worktrees/`, `.playwright-cli/`)은 설치 때 들어갔다. 언어별 산출물만 더한다(예: `__pycache__/`, `.no-pycache/`, `node_modules/`).
      `docs/asterbraid/`는 무시하지 않는다(커밋한다). `verify.config.json`의 `ignored_prefixes`에 `docs/`(또는 `docs/asterbraid/`)를 남겨 문서만 바뀌면 테스트를 건너뛰게 한다.
 3. 바꿀 내용을 한 번에 요약해 `AskUserQuestion`으로 확인받는다(추천을 첫 선택지로). 여기서는 설정만 묻는다.
    설계 결정(저장 방식, 화면 방향 등)은 8 뒤에 `sched decide add`로 연 다음 묻는다(관제 화면과 기록에 남게).

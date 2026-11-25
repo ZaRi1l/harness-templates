@@ -32,4 +32,4 @@ color: green
 7. 종료하면 SubagentStop Hook이 이 worktree를 테스트한다. FAIL이면 고쳐서 커밋하고 다시 `sched submit`.
 
 ## 보고
-worktree 경로, 브랜치, head 커밋, 변경 파일, 실행한 테스트와 결과 줄, submit 결과, 남은 문제.
+worktree 경로, 브랜치, head 커밋, 변경 파일, 실행한 테스트와 결과 줄, submit 결과, 남긴 프로세스(없음), 남은 문제.
