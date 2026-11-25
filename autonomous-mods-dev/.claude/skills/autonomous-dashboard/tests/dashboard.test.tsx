@@ -445,7 +445,7 @@ test('세션 시작 없이 다시 불러와져도(리로드) 다른 Hook에서 �
   await ui.unmount()
 })
 
-test('에이전트 목록: 일을 마친 팀원(idle)은 실행으로 세지 않고, 목록에서 사라지면 끝난 것으로 본다', async () => {
+test('에이전트 목록: 일을 마친 팀원(idle)은 실행으로 세지 않고, 목록에 없는 것은 그대로 둔다', async () => {
   const runs = [run({ agentId: 'idle-mate' }), run({ agentId: 'busy' }), run({ agentId: 'gone' }), run({ agentId: 'done' })]
   const agents = [
     { id: 'idle-mate', status: 'idle', taskStatus: 'running', tokenCount: 1200 },
@@ -453,11 +453,22 @@ test('에이전트 목록: 일을 마친 팀원(idle)은 실행으로 세지 않
     { id: 'done', status: 'completed', taskStatus: 'completed' },
   ] as const
   const next = C.applyAgentList(runs, agents, 50)
-  expect(next.map(r => `${r.agentId}:${r.status}`)).toEqual(['idle-mate:idle', 'busy:running', 'gone:stopped', 'done:completed'])
+  expect(next.map(r => `${r.agentId}:${r.status}`)).toEqual(['idle-mate:idle', 'busy:running', 'gone:running', 'done:completed'])
   expect(next[0]?.tokens).toBe(1200)
-  expect(C.runningRuns(next).map(r => r.agentId)).toEqual(['busy'])
+  expect(C.runningRuns(next).map(r => r.agentId)).toEqual(['busy', 'gone'])
   // idle 팀원은 멈춤 경고 대상이 아니다
-  expect(C.anomalies(null, next, 60 * 60_000, 10 * 60_000).map(a => a.agentId)).toEqual(['busy'])
+  expect(C.anomalies(null, next, 60 * 60_000, 10 * 60_000).map(a => a.agentId)).toEqual(['busy', 'gone'])
   // 다시 일을 받으면 실행으로 돌아온다
   expect(C.applyAgentList(next, [{ id: 'idle-mate', status: 'running', taskStatus: 'running' }], 60)[0]?.status).toBe('running')
+})
+
+test('목록에 없는 에이전트(예: 격리 worktree 실행)를 끝난 것으로 바꾸지 않는다', async ($, on) => {
+  const calls = engine(on) // agent.list는 빈 목록을 돌려준다
+  await start($)
+  await spawn($, '[auto-task id=API pool=implement attempt=1]\n구현', 'implementer', 'API 구현')
+  await calls.clock.advance(6_000) // 세 틱: 에이전트 목록을 읽는 틱이 지나간다
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /실행 미확인/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /implementer · / })).toBeDefined()
+  await ui.unmount()
 })

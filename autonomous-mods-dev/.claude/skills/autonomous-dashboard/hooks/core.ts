@@ -435,14 +435,14 @@ export type AgentSeen = { readonly id: string; readonly status: string; readonly
 
 /**
  * Claude Code가 보고한 에이전트 목록으로 실행 기록을 맞춘다.
- * 팀원은 일을 마쳐도 taskStatus가 running으로 남으니 status(idle)를 본다. 목록에서 사라진 것은 끝난 것으로 본다.
+ * 팀원은 일을 마쳐도 taskStatus가 running으로 남으니 status(idle)를 본다. 목록에 없는 것은 그대로 둔다(끝은 agent.report로 안다).
  */
 export const applyAgentList = (runs: Run[], agents: readonly AgentSeen[], now: number): Run[] => {
   const byId = new Map(agents.map(a => [a.id, a]))
   return runs.map(r => {
     if (r.status !== 'running' && r.status !== 'idle') return r
     const a = byId.get(r.agentId)
-    if (!a) return { ...r, status: 'stopped', endedMs: r.endedMs ?? now }
+    if (!a) return r // 목록에 없다고 끝난 것으로 보지 않는다(격리 실행 등은 목록에 안 보일 수 있다). 끝은 agent.report로 안다
     const tokens = typeof a.tokenCount === 'number' ? a.tokenCount : r.tokens
     const end = a.status === 'completed' || a.taskStatus === 'completed' ? 'completed'
       : a.status === 'failed' || a.taskStatus === 'failed' ? 'failed'
