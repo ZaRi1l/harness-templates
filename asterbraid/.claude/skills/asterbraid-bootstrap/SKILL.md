@@ -30,6 +30,9 @@ description: asterbraid의 시작 준비(처음 한 번). 사용자가 asterbrai
    (`uv run --no-project --offline python .claude/hooks/verify.py --target . --force`). 실패하면 통합이 모두 막히므로,
    실패 목록을 보여 주고 먼저 고칠지(작업으로 등록) 사용자 결정을 받는다. 테스트를 지우거나 건너뛰지 않는다.
 8. `sched init`. 그다음 설계 결정이 있으면 한꺼번에 `sched decide add`로 열고 `AskUserQuestion` 한 번으로 묻는다.
+9. 기존 코드가 있으면 프로젝트 지도를 researcher에게 맡긴다(다른 작업은 기다리지 않는다):
+   `sched add --id MAP --title "프로젝트 지도" --profile research --risk low --paths docs/asterbraid/research/ --criteria "구조 지도 문서"`
+   → `start MAP --pool research` → researcher(지시: 프로젝트 지도) → `sched done MAP --close --notes <경로>` → 커밋.
 
 | `verify.config.json` 키 | 의미 |
 |---|---|

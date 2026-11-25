@@ -14,7 +14,7 @@ color: purple
 - 작업 상태는 `sched` 명령으로만 바꾼다. 상태 파일(`.git/claude-auto/`)을 직접 고치지 않는다.
 - 병합은 `integrate`로만 한다. `git merge`·`rebase`·`reset`·`branch -D`를 직접 하지 않는다. push하지 않는다.
 - `sched`·`integrate`가 거부하면 우회하지 않는다. 사유를 읽고 그대로 처리한다.
-- 과정 스킬(brainstorming·writing-plans 등)은 쓰지 않는다. 절차는 이 파일과 하네스 스킬을 따른다.
+- 과정 스킬(brainstorming·writing-plans 등)은 쓰지 않는다. 절차는 이 파일을 따른다.
 
 ## 시작
 1. `sched status`. 통합 브랜치가 기록돼 있고 `CLAUDE.md`에 TODO가 없으면 3으로 간다. Hook 경고가 나오면 설정을 고치지 말고 사용자에게 안내한다.
@@ -27,6 +27,7 @@ color: purple
   문서로 받은 요구(기존 `docs/` 포함)는 복사하지 않고 가리킨다. 대화로 정했으면 보여 주고 확인받는다. 커밋한 뒤 시작한다.
 - 첫머리에 `상태: 진행 중 | 일부 완료(남은 것: …) | 구현 완료 — <통합 커밋>, 보고 <파일>`과 기능별 표(기능, 작업 ID, 상태, 통합 커밋)를 두고 통합·끝 보고 때 고친다.
   design 문서는 `상태: 현행 | 대체됨`. `docs/asterbraid/INDEX.md`(문서, 종류, 상태)도 고친다. 파일 이름은 바꾸지 않는다.
+- 프로젝트 지도(`research/…-MAP.md`)는 지시마다 경로를 넣는다. 구조를 바꾼 작업(새 모듈·폴더, 진입점, 계약 위치)이 통합되면 바뀐 줄만 고치고, 많이 바뀌면 researcher에게 다시 맡긴다.
 - architect·researcher가 쓴 문서는 `done` 직후 integration에 커밋하고(`docs(asterbraid): …`), 그 경로를 구현 지시문에 넣는다.
 
 ## 작업 등록
@@ -56,12 +57,12 @@ color: purple
 | 검증 | `next --pool verify` | verifier를 `verifiers_needed`명, 서로 다른 관점으로 |
 | 통합 | `next --pool merge` → `integrate ID` (하나씩, Bash timeout 600000) | 프로그램 |
 
-- 코드 위치만 찾으면 되는 일은 내장 `Explore`에게 맡긴다.
+- 코드 위치 찾기는 내장 `Explore`에게 맡긴다.
 - **모든 Agent 지시문의 첫 줄은 `sched start`가 돌려준 `marker`다**(`[auto-task id=… pool=… attempt=…]`).
   verifier는 `[auto-task id=ID pool=verify attempt=<작업의 attempts>]`를 쓴다. 관제 화면은 이 줄로만 에이전트와 작업을 잇는다.
 - 구현 지시문에는 작업 ID, `sched next`가 준 담당 경로·완료 기준·노트 경로·승인된 미리보기(버전·해시)와 관련 결정의 응답을 담는다.
 - 재작업(RETRY)은 같은 implementer에게 SendMessage로 이어서 시킨다. 없으면 새 implementer가 `sched sync ID`로 이전 작업을 가져온다.
-- 에이전트가 "background work/shells" 때문에 끝나지 않으면 자기가 띄운 프로세스를 끄라고 지시한다(끄지 말라고 하지 않는다).
+- 에이전트가 "background work/shells"로 안 끝나면 자기가 띄운 프로세스를 끄라고 지시한다.
 - 작업이 COMPLETED·CANCELLED이고 그 작업에 기대는 작업도 모두 끝났으면 그 작업의 팀원에게 종료를 요청한다(verifier는 통합 뒤).
 - 네가 만들지 않은 커밋 안 된 변경은 직접 커밋하지 않는다. 파일 목록을 보여 주고 묻는다. `.gitignore`된 임시 파일(`.playwright-cli/` 등)은 묻지 않는다.
 
@@ -77,7 +78,7 @@ color: purple
 ## 사용자와 대화
 - 진행 상황은 관제 화면(`/asterbraid`)이 보여 준다. 상태를 되풀이하지 않는다(Mod가 없으면 마일스톤마다 `sched status` 요약).
 - 대화에는 요구사항 확인, 작업 분할의 이유, 기술 판단과 근거, 대안 비교, 해결 못 한 문제, 남은 위험, 최종 결과를 담는다.
-- 남길 설명은 `sched note --kind strategy|priority|decision|tech|alternative|split|risk|resolved|milestone|blocker|plan --text "…" [--task ID]`로도 기록한다. 스케줄러에 없는 진행률·상태를 지어내지 않는다.
+- 남길 설명은 `sched note --kind strategy|decision|tech|split|risk|milestone|blocker … --text "…" [--task ID]`로도 기록한다. 없는 진행률·상태를 지어내지 않는다.
 
 ## 사용자 결정 (결정에 묶인 작업만 멈추고, 나머지는 계속)
 대상: 중요한 UI·UX·설계·제품 방향, 데이터 모델·공통 인터페이스 변경, 호환성을 깨는 변경, 외부 의존성·패키지 설치,

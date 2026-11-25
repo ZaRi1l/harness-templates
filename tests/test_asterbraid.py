@@ -358,6 +358,24 @@ class TestSettingsWarning(ModsCase):
         self.assertTrue(self.ok("status", "--json")["warnings"])
 
 
+class TestProjectMap(ModsCase):
+    """시작 준비 9: 기존 프로젝트의 지도는 researcher 작업(MAP)으로 만들고 노트와 함께 닫는다."""
+
+    def test_bootstrap_map_command_runs(self):
+        skill = (Path(base.__file__).resolve().parent.parent / MODS / ".claude/skills/asterbraid-bootstrap/SKILL.md").read_text(encoding="utf-8")
+        cmd = '--id MAP --title "프로젝트 지도" --profile research --risk low --paths docs/asterbraid/research/ --criteria "구조 지도 문서"'
+        self.assertIn(cmd, skill)
+        self.ok("add", "--id", "MAP", "--title", "프로젝트 지도", "--profile", "research", "--risk", "low",
+                "--paths", "docs/asterbraid/research/", "--criteria", "구조 지도 문서")
+        self.add("A", paths="src/")
+        self.assertEqual([t["id"] for t in self.ok("next", "--pool", "implement")["dispatch"]], ["A"])  # 지도를 기다리지 않는다
+        self.ok("start", "MAP", "--pool", "research", "--agent", "researcher")
+        rel = "docs/asterbraid/research/2026-11-26-0100-MAP.md"
+        (self.repo.path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo.path / rel).write_text("색인이다. 판단은 실제 코드로 한다\n", encoding="utf-8")
+        self.assertEqual(self.ok("done", "MAP", "--close", "--notes", rel)["state"], "COMPLETED")
+
+
 class TestTaskTiming(ModsCase):
     """4-12: Mod가 완료 작업의 걸린 시간을 보이도록 스냅샷에 첫 배정 시각을 둔다."""
 
