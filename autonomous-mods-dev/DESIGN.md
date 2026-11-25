@@ -39,6 +39,8 @@
 | 설계 형식 | `architecture-design` 스킬(architect만 미리 불러옴). deep 점검표는 `references/`로 분리 | 깊이마다 필수 항목을 정해 implementer가 추측하지 않게. 긴 점검표는 deep일 때만 읽어 컨텍스트를 아낀다 |
 | 에이전트 모델 (2026-11-25) | manager·implementer opus, architect fable, 나머지 sonnet | implementer는 `inherit`이면 세션을 어떻게 열었는지에 따라 모델이 바뀌어 opus로 고정했다(지금까지의 e2e와 같은 품질). architect는 실행 횟수가 적고 어려운 추론이 몰려, 가격 2배인 fable의 효과가 가장 크다. manager는 짧은 판단을 오래 반복해 fable의 긴 응답·비용이 불리하다 |
 | 외부 방법론 스킬 | implementer에게 superpowers TDD·디버깅·완료 검증을 "있으면 사용"으로만 안내. 필수로 미리 불러오지 않는다 | 설치 여부·이름이 환경마다 다르다. 그 스킬들의 자체 worktree·서브에이전트·병합 절차는 스케줄러와 겹치므로 쓰지 않는다 |
+| AI 문서 위치 (2026-11-25) | `docs/ai-harness/{requirements,research,design,reports}/`에 날짜·시각 이름으로 쓰고 manager가 바로 커밋 | e2e3에서 계약 문서가 `.git` 안 노트나 메인 체크아웃에만 있어 worktree에서 안 보이고 통합에도 없었다. 대화로 정한 요구도 남지 않았다. 미리보기·상태·증거는 해시·프로그램 검사가 걸려 있어 그대로 둔다 |
+| 의존 변경 | `sched deps`(구현 전, 순환 검사), 승인된 미리보기 작업의 `cancel`은 `--force` | e2e3에서 의존을 바꾸려고 취소·재등록하다 미리보기 승인 연결이 끊겼다 |
 | 조사만 하는 작업 | `sched done --close`(노트 필수, 브랜치 있으면 거부) | 1차 e2e에서 진단 작업을 닫을 길이 없어 BLOCKED로 쌓였다 |
 | 정리 미리보기 | `sched cleanup --dry-run` | 자동 모드 분류기가 대상이 안 보이는 정리를 거부했다(2차 e2e). 목록을 먼저 보이면 사람과 분류기가 판단할 수 있다 |
 

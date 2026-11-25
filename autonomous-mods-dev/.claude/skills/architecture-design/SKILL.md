@@ -18,7 +18,8 @@ description: autonomous-mods-dev의 설계 절차. architect가 작업의 설계
 | deep | 핵심 구조, 공통 계약, 복잡한 알고리즘, 데이터 무결성·보안이 중요한 것 | standard + `references/deep-checklist.md`의 해당 항목(상태 전이, 동시성·트랜잭션, 장애·복구, 보안·신뢰 경계, 비기능 목표, 마이그레이션) |
 
 ## design.md 형식
-노트 폴더(`sched notes-dir <작업 ID>`)의 `design.md` 하나가 기본이다. 길어지면 `contracts.md`·`data-model.md`로 나누고 design.md에서 잇는다.
+`docs/ai-harness/design/YYYY-MM-DD-HHMM-<작업 ID>.md` 하나가 기본이다(이 문서에서 design.md라 부른다). 첫머리에 작성 시각·작업 ID·깊이.
+길어지면 같은 폴더에 `…-<작업 ID>-contracts.md` 등으로 나누고 본 문서에서 잇는다.
 
 ```markdown
 # <작업 ID> 설계 (깊이: standard)

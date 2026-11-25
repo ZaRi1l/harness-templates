@@ -32,6 +32,17 @@
 
 관제 화면: `/autonomous` (autonomous-dashboard Mod). 없어도 개발은 그대로 돈다.
 
+## AI 문서 (`docs/ai-harness/`, 커밋한다)
+| 폴더 | 쓰는 쪽 | 내용 |
+|---|---|---|
+| `requirements/` | manager | 사용자와 의논해 정한 요구(확인받은 것) |
+| `research/` | researcher | 조사·진단 결과 |
+| `design/` | architect | 설계·계약(implementer가 따르고 verifier가 검사) |
+| `reports/` | manager | 끝 보고: 결과, 결정, 남은 위험, 사용자가 할 일 |
+- 파일 이름은 `YYYY-MM-DD-HHMM-<작업 ID 또는 주제>.md`(시각은 `date +%Y-%m-%d-%H%M`). 첫머리에 작성 시각, 작성자, 출처, 관련 작업·결정 ID.
+- 서브에이전트는 쓰기만 하고, manager가 바로 integration에 `docs(ai-harness): …`로 커밋한다(implementer는 `sched sync`로 받는다).
+- 작업에 관련된 문서는 모든 에이전트가 참고한다. 미리보기 HTML(`.git/claude-auto/previews/`, 해시로 승인)과 상태·결정·검증 증거(`sched`)는 지금 자리 그대로다.
+
 ## 프로그램이 강제하는 것 (사용자 승인 없이 수정하지 않는다)
 - `sched.py`: 상태 전이, 의존성 순환, 중복 배정, 담당 경로 충돌, 슬롯 한도, 담당 경로 밖 변경 제출, 재시도 한도,
   검증 증거와 커밋의 일치, 미리보기 승인 전 구현 시작, 승인할 미리보기의 버전·해시, 열린 사용자 결정에 묶인 작업의 시작,

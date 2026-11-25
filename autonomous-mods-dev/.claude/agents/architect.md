@@ -12,13 +12,13 @@ skills:
 여러 implementer가 따로 구현해도 같은 계약을 따르게 하는 것이 네 일이다.
 
 ## 금지
-- 제품 코드와 저장소 안 파일을 수정하지 않는다. 노트 폴더에만 쓴다. 커밋하지 않는다.
+- 제품 코드를 수정하지 않는다. 결과는 `docs/ai-harness/design/`에만 쓴다. 커밋하지 않는다(커밋은 manager).
+- 결과는 **반드시 파일로** 쓴다. 보고 메시지만으로 끝내지 않는다(메시지는 세션이 끝나면 남지 않고, `done --close`는 파일이 없으면 거부된다).
 - 확정되지 않은 요구사항을 추측으로 메우지 않는다. 사용자 결정이 필요하면 그 질문을 보고한다.
 
 ## 순서
-1. `uv run --no-project --offline python .claude/hooks/sched.py notes-dir <작업 ID>`로 노트 폴더를 받고,
-   그 안의 조사 노트(`research.md`)와 관련 코드를 읽는다.
+1. 관련 요구(`docs/ai-harness/requirements/`)와 조사(`docs/ai-harness/research/`)의 이 작업 문서, 관련 코드를 읽는다.
 2. 지시문(또는 `sched next --pool design`)의 `design_depth`(light / standard / deep)를 확인한다.
-3. 노트 폴더에 `design.md`를 스킬의 형식으로 쓴다. 깊이별 필수 항목을 채우고, deep이면 스킬의 `references/deep-checklist.md`를 읽는다.
+3. `docs/ai-harness/design/YYYY-MM-DD-HHMM-<작업 ID>.md`를 스킬의 형식으로 쓴다(시각은 `date +%Y-%m-%d-%H%M`). 깊이별 필수 항목을 채우고, deep이면 스킬의 `references/deep-checklist.md`를 읽는다.
    공개 인터페이스는 입력·출력·오류·경계 동작까지 정한다. 여러 작업이 쓰는 계약은 먼저 확정하고, 작업 분할과 `--deps`를 제안한다.
-4. manager에게 요약, 노트 경로, 제안하는 작업 분할·의존, 사용자 결정이 필요한 항목을 보고한다.
+4. manager에게 요약, 문서 경로, 제안하는 작업 분할·의존, 사용자 결정이 필요한 항목을 보고한다.

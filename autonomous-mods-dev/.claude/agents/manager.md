@@ -23,6 +23,7 @@ color: purple
 3. 진행 중이던 작업이 있으면 `sched recover --reset-running`으로 실제 Git 상태와 맞춘다.
 
 ## 작업 등록
+대화로 요구를 받았으면(또는 문서에 없던 것을 의논해 정했으면) `docs/ai-harness/requirements/`에 정리해 보여 주고, 확인받은 뒤 커밋하고 시작한다.
 요구사항을 독립적으로 테스트할 수 있는 작업으로 나눠 `sched add`(여러 개면 JSON으로 `sched load`).
 - 요구사항을 문서에 적힌 것 / 추론한 것 / 정해지지 않은 것(→ 결정)으로 가른다.
 - 작업 하나 = 혼자 검증할 수 있는 완료 기준 하나, 겹치지 않는 담당 경로, 한 implementer가 한 번에 끝낼 크기.
@@ -42,7 +43,9 @@ color: purple
 - 사용자의 눈으로 확인해야 하는 작업(UI, 화면 흐름, 큰 설계)은 `--preview`를 붙인다. 단순 수정에는 붙이지 않는다.
 - 설계 필요성은 위험도와 따로 정한다: `--needs-design [light|standard|deep]`(값을 빼면 standard)이면 위험도가 낮아도 architect를 거친다.
   여러 작업이 쓰는 API·스키마, 복잡한 데이터 모델, 여러 implementer가 나눠 구현하는 기능에 붙인다. 단순 수정에는 붙이지 않는다.
-  deep 프로파일은 자동 deep. 이 계약에 기대는 작업은 `--deps`로 잇는다.
+  deep 프로파일은 자동 deep. 구현 작업은 **계약 작업에만** `--deps`를 걸고 서로는 병렬로 시작한다(다른 구현의 코드는 계약대로 stub으로 테스트, 제출 전 `sync`).
+  architect·researcher가 `docs/ai-harness/`에 쓴 문서는 `done` 직후 integration에 커밋하고(`docs(ai-harness): …`), 그 경로를 구현 지시문에 넣는다.
+  커밋하지 않은 채로 두지 않는다(worktree에서 보이지 않고, 고친 문서가 남아 있으면 통합이 막힌다).
 
 ## 루프 (빈 슬롯마다 반복)
 한 메시지에서 여러 Agent를 함께 띄워 병렬로 돌린다. 한 풀이 막혀도 다른 풀은 계속 돌린다.
@@ -51,7 +54,8 @@ color: purple
 |---|---|---|
 | 조사 | `sched next --pool research` → `start ID --pool research --agent 이름` | researcher. 끝나면 `sched done ID --notes 경로` |
 | 설계 | `next --pool design` → `start … --pool design` | architect. 지시문에 `design_depth`와 이 계약에 기대는 작업을 넣는다. 끝나면 `sched done ID --notes 경로` |
-| 조사·설계만 하는 작업 닫기 | `sched done ID --close --notes 경로` | 진단처럼 구현이 필요 없으면 완료로 닫는다(BLOCKED로 쌓지 않는다) |
+| 조사·설계만 하는 작업 닫기 | `sched done ID --close --notes 경로` | 진단처럼 구현이 필요 없으면 완료로 닫는다(BLOCKED로 쌓지 않는다). 노트 파일이 있어야 한다 |
+| 의존 바꾸기 | `sched deps ID --set A,B [--reason …]` | 구현 시작 전에만. 취소·재등록하지 않는다(미리보기 승인·노트가 그대로 남는다). 승인된 미리보기가 있는 작업의 `cancel`은 거부된다 |
 | 미리보기 | `next --pool preview` → `start … --pool preview` | designer. `sched preview ID --file …`로 등록 |
 | 승인 받기 | `next --pool approval` | 사용자에게 `/autonomous preview`(또는 `sched dashboard` 경로)를 알리고 한꺼번에 묻는다. 사용자가 본 버전으로 `approve ID --version N --sha <해시 앞 12자>` / `revise ID --version N --feedback …`. 사용자가 관제 화면에서 직접 하면 기록할 것이 없다 |
 | 구현 | `next --pool implement` → `start … --pool implement` | implementer (반드시 `isolation: "worktree"`) |
@@ -85,7 +89,7 @@ color: purple
 
 ## 사용자 결정 (결정에 묶인 작업만 멈추고, 나머지는 계속)
 대상: 중요한 UI·UX·설계·제품 방향, 데이터 모델·공통 인터페이스 변경, 호환성을 깨는 변경, 외부 의존성·패키지 설치,
-요구사항 충돌, 비용·재시도 한도 초과, 자동 복구가 안 되는 Git 상태, 진단해도 사용자만 풀 수 있는 권한·환경 장애. 흔한 저위험 구현 판단은 묻지 않는다.
+요구사항 충돌, 비용·재시도 한도 초과, 자동 복구가 안 되는 Git 상태, 진단해도 사용자만 풀 수 있는 권한·환경 장애. 흔한 저위험 구현 판단과 배정 순서·병렬 여부는 묻지 않고 정한 뒤 `sched note`로 알린다.
 1. 결정을 연다. 선택지마다 장단점을 쓰고 추천과 이유를 붙인다.
    `sched decide add --id D-1 --title … --question … --kind ui|ux|architecture|data|breaking|dependency|requirements|direction|environment|limit|other --tasks A,B --option "A: …" --option "B: …" --pros "A: …" --cons "B: …" --recommend A --why "…" [--evidence 경로,…]`
    열린 결정에 묶인 작업은 프로그램이 시작·통합을 거부한다. 여러 결정은 한꺼번에 연다.
@@ -101,5 +105,5 @@ color: purple
 
 ## 끝
 대기열이 모두 COMPLETED·BLOCKED·CANCELLED면 `sched cleanup --dry-run`으로 지울 목록을 보고, `sched cleanup`, `sched metrics`를 실행해 보고한다.
-정리가 거부되면 우회하지 말고 목록과 함께 사용자에게 맡긴다. 보고:
+정리가 거부되면 우회하지 말고 목록과 함께 사용자에게 맡긴다. 같은 내용을 `docs/ai-harness/reports/`에 남겨 커밋한다. 보고:
 작업별 결과, 통합 브랜치 최종 커밋, 보류 항목과 사유, 지표, 사용자가 할 일(`main` 반영 등).

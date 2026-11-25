@@ -7,7 +7,7 @@
 ## 흐름
 ```mermaid
 flowchart TD
-    T["템플릿 + 설계 문서"] -->|"처음 한 번"| BS["manager: 시작 준비<br/>(git init) · CLAUDE.md · verify.config · .gitignore<br/>→ 확인 → integration · sched init"]
+    T["템플릿 + 설계 문서<br/>또는 기존 프로젝트에 이식"] -->|"처음 한 번"| BS["manager: 시작 준비 (harness-bootstrap)<br/>(git init) · CLAUDE.md · verify.config · .gitignore 채우기·합치기<br/>→ 확인 → integration · 기준선 테스트 · sched init"]
     BS --> M
     U["사용자"] <-->|"대화 · 결정"| M["manager<br/>판단 · 설명 · 조정"]
     U -.->|"관제 · 승인 · 결정 버튼"| P["autonomous-dashboard<br/>Pane · /autonomous"]
@@ -17,8 +17,10 @@ flowchart TD
     S -->|"dashboard.json<br/>(읽기 전용 스냅샷)"| P
     S -->|"dashboard"| H
     S -.-> R["researcher"] & A["architect"] & D["designer"]
+    A -->|"design.md 계약"| I
     S -->|"빈 슬롯마다"| I["implementer ×N<br/>각자 worktree"]
-    I --> V{"verifier"}
+    I --> V{"verifier<br/>계약·미리보기·테스트"}
+    V -->|"FAIL → RETRY"| I
     V -->|"PASS"| G{"integrate.py<br/>임시 worktree"}
     G -->|"MERGED"| B["통합 브랜치"]
     B -.->|"사용자가 결정"| MAIN["main"]
@@ -47,6 +49,8 @@ flowchart TD
 | 설계 | deep 프로파일(위험도 high)에서만 architect | `--needs-design [light\|standard\|deep]`로 위험도와 따로 정한다. architect는 `architecture-design` 스킬의 깊이별 형식으로 계약(인터페이스·데이터·오류)과 작업 분할을 쓴다 |
 | 조사·설계만 하는 작업 | 없음 | `sched done ID --close --notes …`로 구현 없이 완료 |
 | 정리 | `sched cleanup` | + `--dry-run`으로 지울 worktree·브랜치 목록을 먼저 보인다 |
+| 의존 바꾸기 | 없음(취소·재등록) | `sched deps ID --set A,B`(구현 시작 전, 순환 검사). 승인된 미리보기가 있는 작업은 `cancel --force` 없이 취소되지 않는다 |
+| 기존 프로젝트 | 직접 준비 | 이식하면 시작 준비가 기존 파일을 살려 합치고, 기준선 테스트를 먼저 확인한다 |
 | 필요한 것 | Claude Code | Claude Code 2.1.331에서 검증(Mods API는 early access) |
 
 고르는 법: Mods를 쓸 수 없거나 화면 없이 안정적인 엔진만 필요하면 `autonomous-parallel-dev`. 사용자가 대화하며 진행을 지켜보고 결정·검토를 자주 해야 하면 이 템플릿.
@@ -82,6 +86,13 @@ Mod를 `.claude/mods/`가 아니라 `.claude/skills/`에 두는 것은 Claude Co
 
 그 뒤 진행은 Pane에서 보고, 결정·검토가 필요하면 manager가 묻는다. 끝나면 `integration`을 확인하고 `main`에 직접 반영한다.
 직접 채우고 싶으면 시작 전에 TODO·`verify.config.json`·`.gitignore`를 채우고 `git switch -c integration`해 두면 manager가 준비를 건너뛴다.
+
+### 진행 중인 프로젝트에 이식
+1. 템플릿의 `.claude/`를 복사한다. 이미 `.claude/settings.json`·`CLAUDE.md`·`.gitignore`가 있으면 **덮어쓰지 말고** 템플릿 쪽을
+   `*.harness` 같은 이름으로 옆에 둔다(시작 준비에서 manager가 둘을 합친 안을 보여 확인받는다). `.claude/agents/` 이름이 겹치면 미리 정리한다.
+2. 커밋하지 않은 변경은 커밋하거나 치워 둔다(시작 준비는 섞인 변경을 커밋하지 않고 묻는다).
+3. 요구(추가할 기능)를 문서로 주거나 대화로 준다. 시작 준비가 코드에서 언어·테스트 도구를 읽고, `sched init` 전에 현재 코드로 전체 테스트를 한 번 돌린다.
+   기존 테스트가 실패하면 통합이 모두 막히므로, 먼저 고칠지 결정을 받는다.
 
 Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"autonomous-dashboard@skills-dir": false}}`. 개발 기능은 그대로 돈다.
 한 세션만 다른 폴더의 Mod로 열려면 `claude --agent manager --plugin-dir ./.claude/skills/autonomous-dashboard`.
@@ -149,6 +160,19 @@ manager가 중요한 선택을 만나면 결정을 열고(`sched decide add`, �
 - 승인한 버전의 해시가 검증 기준에 들어간다. 승인이 바뀌면 이전 검증 증거는 무효다. 승인 기록에는 시각·누가·당시 완료 기준 해시도 남는다(기록용).
 - 대시보드는 읽기 전용이다. 승인 버튼이 없고 로컬 서버도 없다. 미리보기는 `sandbox="allow-scripts"` iframe으로만 띄워, 미리보기 안의 코드가 대시보드나 승인에 닿지 못한다.
 
+## AI 문서 (`docs/ai-harness/`)
+에이전트가 개발하며 남기는 문서는 저장소의 `docs/ai-harness/`에 두고 커밋한다. 세션이 바뀌어도 남고, implementer는 `sched sync`로 자기 worktree에서 읽는다.
+| 폴더 | 쓰는 쪽 | 내용 |
+|---|---|---|
+| `requirements/` | manager | 대화로 의논해 정한 요구(보여 주고 확인받은 것) |
+| `research/` | researcher | 조사·진단 결과 |
+| `design/` | architect | 설계·계약. implementer가 따르고 verifier가 검사한다 |
+| `reports/` | manager | 끝 보고(결과, 결정, 남은 위험, 사용자가 할 일) |
+
+파일 이름은 `YYYY-MM-DD-HHMM-<작업 ID 또는 주제>.md`, 첫머리에 작성 시각·작성자·출처·관련 작업과 결정. 서브에이전트는 쓰기만 하고 manager가 바로 `docs(ai-harness): …`로 커밋한다.
+문서만 바뀌면 테스트를 돌리지 않는다(`verify.config.json`의 `ignored_prefixes`의 `docs/`). 미리보기 HTML과 상태·결정·검증 기록은 지금처럼 `.git/claude-auto/`와 `sched`에 둔다(해시로 승인하고 프로그램이 검사한다).
+요구를 대화로 줄 때는 "지금 얘기한 걸 requirements로 정리해서 보여 주고, 확인받은 다음에 진행해줘"라고 하면 된다.
+
 ## 설계 깊이
 manager가 작업마다 정한다. 위험도(검증 수)와 별개다.
 | 깊이 | 쓰는 곳 | design.md에 반드시 |
@@ -165,6 +189,7 @@ verifier는 한 번 검증할 때 막는 결함을 모두 적는다(라운드마
 | 스킬 | 쓰는 에이전트 | 쓰는 곳 |
 |---|---|---|
 | test-driven-development, systematic-debugging, verification-before-completion (superpowers) | implementer | 새 동작, 원인을 모르는 실패, 완료 보고 전 |
+| playwright-cli | verifier, designer | verifier: 웹 UI를 실제 브라우저로 열어 미리보기와 비교·버튼·입력·콘솔 오류 확인(없으면 "브라우저 검증 못 함"을 남기고 다른 근거로 판정). designer: 미리보기가 브라우저에서 뜨는지 확인 |
 
 ## 디자인 스킬 (선택)
 designer는 세션에 있는 것만 `Skill`로 골라 쓴다. 없으면 기본 절차로 만든다. 설치는 사용자가 한다.
