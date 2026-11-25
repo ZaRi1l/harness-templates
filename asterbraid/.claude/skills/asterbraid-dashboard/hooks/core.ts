@@ -959,7 +959,8 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
       { text: `${m.mark} `, tone: m.tone },
       { text: `${id}  `, bold: true }, // ID는 자르지 않는다(무슨 작업인지 알아보게)
       { text: m.label, tone: m.tone },
-      ...(waitFor.length ? [{ text: ` · ${waitFor.join('·')}가 이 계약을 쓰는 중`, tone: 'dim' as Tone }] : []),
+      // 설계(계약) 작업이면 계약을 쓰는 중, 아니면 순서만 걸린 것
+      ...(waitFor.length ? [{ text: ` · ${waitFor.join('·')}${rs.some(r => r.pool === 'design') ? '가 이 계약을 쓰는 중' : '가 이 작업 뒤에 이어짐'}`, tone: 'dim' as Tone }] : []),
       ...(t?.title ? [{ text: ` · ${t.title}` }] : []), // 폭이 모자라면 제목 끝부터 줄어든다
     ])
     const sorted = [...rs].sort((a, b) => rank(a) - rank(b) || b.startedMs - a.startedMs)

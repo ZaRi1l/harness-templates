@@ -748,3 +748,11 @@ test('자리 비운 동안 정한 것: 고른 안을 자르지 않고, 자세히
   expect(open).toContain('추천 이유: 기존 데이터를 건드리지 않는다')
   expect(open).toContain('종류 architecture')
 })
+
+test('에이전트 트리: 설계 작업이 아니면 "이 작업 뒤에 이어짐"으로 이유를 보인다', async () => {
+  const snap = { ...SNAP, tasks: [task({ id: 'FIX', state: 'COMPLETED' }), task({ id: 'UI', state: 'PENDING', deps: ['FIX'] })] }
+  const text = C.agentLines(snap, [run({ task: 'FIX', pool: 'verify', attempt: 1, role: 'verifier', status: 'idle' })], 0, null, false, 120)
+    .map(l => l.map(s => s.text).join(''))
+  expect(text[1]).toContain('UI가 이 작업 뒤에 이어짐')
+  expect(text[1]).not.toContain('계약')
+})
