@@ -126,8 +126,9 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"autonomous-da
 | `approve ID v2` / `revise ID v2 피드백` | 본 버전 승인(해시 함께) / 수정 요청 |
 | `decide D-1 A [메모]` | 결정 기록 |
 | `pause [사유]` / `resume`, `limit POOL N`, `priority ID N` | 새 배정 멈춤·재개, 슬롯, 우선순위 |
+| `unblock ID` | 보류 해제(sched.py가 재작업·준비 상태로 되돌린다). 작업 탭에서 보류된 작업을 펼쳐 버튼으로도 한다 |
 
-브라우저는 Windows `explorer.exe`, macOS `open`, Linux `xdg-open`으로 연다(셸 없이). 열 수 없으면 파일 경로를 알려 준다.
+브라우저는 Windows `explorer.exe`(PATH에 없으면 `C:\Windows\explorer.exe`), macOS `open`, Linux `xdg-open`으로 연다(셸 없이). 열 수 없으면 사유와 전체 파일 경로를 알려 준다.
 
 ## 사용자 결정
 manager가 중요한 선택을 만나면 결정을 열고(`sched decide add`, 선택지·장단점·추천·이유·영향 작업), `AskUserQuestion`으로 묻는다.

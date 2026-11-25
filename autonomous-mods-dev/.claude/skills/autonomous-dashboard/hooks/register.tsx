@@ -249,12 +249,23 @@ async function openPreview($: EngineInterface, task: string | null, version: num
   if (!file?.realPath || !dir?.realPath || !C.isInside(file.realPath, dir.realPath, caseless()) || !C.isPreviewFile(file.realPath)) {
     return `등록된 미리보기 폴더 밖의 파일이라 열지 않는다: ${target.file}`
   }
-  const argv = C.openerArgv(sysname, file.realPath)
-  if (!argv) return `이 환경에서는 브라우저를 열 수 없다. 직접 연다: ${file.realPath}`
-  const r = await $.process.run(argv, { timeoutMs: 15_000 }).catch(() => null)
-  // explorer.exe는 성공해도 1을 돌려준다. 실행조차 못 했을 때만 실패로 본다
-  if (!r || (r.exitCode !== 0 && sysname !== 'Windows_NT')) return `브라우저를 열지 못했다. 직접 연다: ${file.realPath}`
-  return `${target.label}을(를) 기본 브라우저로 열었다: ${file.realPath}`
+  const candidates = C.openerArgv(sysname, file.realPath)
+  if (!candidates) return `이 환경에서는 브라우저를 열 수 없다. 직접 연다: ${file.realPath}`
+  let why = ''
+  for (const argv of candidates) {
+    const r = await $.process.run(argv, { timeoutMs: 15_000 }).catch(err => {
+      why = `${argv[0]} 실행 실패: ${err instanceof Error ? err.message : String(err)}`
+      return null
+    })
+    if (!r) continue
+    // explorer.exe는 성공해도 1을 돌려준다. 실행조차 못 했을 때만 실패로 본다
+    if (r.exitCode !== 0 && sysname !== 'Windows_NT') {
+      why = `${argv[0]} 종료 코드 ${r.exitCode}`
+      continue
+    }
+    return `${target.label}을(를) 기본 브라우저로 열었다: ${file.realPath}`
+  }
+  return `브라우저를 열지 못했다(${why}). 직접 연다: ${file.realPath}`
 }
 
 /** 저장소를 다시 찾고 sched.py로 스냅샷을 새로 만든다. 작업 상태는 바꾸지 않는다. */
@@ -436,7 +447,7 @@ export const register: Register = (on, options) => {
     const warns = C.anomalies(snap, runs, now, cfg.stallMs)
     if (layout === 'mini') return <Box flexDirection="column" width={W}>{lines(C.miniLines(snap, meta, runs, W, warns))}</Box>
 
-    const say = (text: string) => setView($, v => ({ ...v, lastAction: `ℹ ${C.fit(text, 100)}` }))
+    const say = (text: string) => setView($, v => ({ ...v, lastAction: `ℹ ${C.fit(text, 400)}` }))
     const userWait = C.awaiting(snap).length + C.openDecisions(snap).length
     const tabs = (
       <Box flexWrap="wrap" columnGap={1}>
@@ -445,7 +456,7 @@ export const register: Register = (on, options) => {
           const badge = t === 'decisions' && userWait ? ` ${userWait}` : ''
           return (
             <Button key={`tab-${t}`} plain hotkey={String(i + 1)} onPress={() => setView($, v => ({ ...v, tab: t as Tab }))}>
-              <Text bold={active} inverse={active} color={active ? 'claude' : badge ? 'warning' : undefined} dimColor={!active && !badge}>{` ${i + 1} ${C.TAB_LABEL[t]}${badge} `}</Text>
+              <Text bold={active} inverse={active} color={active ? 'claude' : badge ? 'warning' : undefined} dimColor={!active && !badge}>{` ${C.TAB_LABEL[t]}${badge} `}</Text>
             </Button>
           )
         })}
@@ -597,9 +608,18 @@ export const register: Register = (on, options) => {
           ? lines(C.timelineLines(snap, now, W))
           : C.queueLines(snap, view.filter, view.expanded, W).map((r, i) =>
               r.id ? (
-                <Button key={`q-${r.id}`} plain onPress={() => setView($, v => ({ ...v, expanded: v.expanded === r.id ? null : (r.id ?? null) }))}>
-                  {r.line.map(seg)}
-                </Button>
+                <Box key={`qr-${r.id}`} flexDirection="column">
+                  <Button key={`q-${r.id}`} plain onPress={() => setView($, v => ({ ...v, expanded: v.expanded === r.id ? null : (r.id ?? null) }))}>
+                    {r.line.map(seg)}
+                  </Button>
+                  {can && view.expanded === r.id && snap.tasks.find(t => t.id === r.id)?.state === 'BLOCKED' && (
+                    <Box columnGap={1}>
+                      <Text>{'   '}</Text>
+                      <Button key={`unblock-${r.id}`} label="보류 해제" onPress={() => act($, { kind: 'unblock', task: r.id ?? '' })} />
+                      <Text dimColor>원인이 풀렸을 때만 누른다. manager가 다시 배정한다</Text>
+                    </Box>
+                  )}
+                </Box>
               ) : (
                 <Box key={`ql-${i}`}>{line(r.line)}</Box>
               ),
@@ -634,7 +654,7 @@ export const register: Register = (on, options) => {
     }
 
     const header = lines(C.headerLines(snap, meta, runs, now, warns, W, cfg.refreshMs))
-    const footer = view.lastAction ? <Text dimColor wrap="truncate">{view.lastAction}</Text> : null
+    const footer = view.lastAction ? <Text dimColor wrap="wrap">{view.lastAction}</Text> : null // 경로를 자르지 않는다
 
     // 넓은 자리에서는 표 위주 탭 옆에 에이전트 목록을 붙인다. 버튼이 많은 탭은 한 줄로 쓴다
     if (layout === 'wide' && view.tab !== 'commands' && view.tab !== 'decisions') {

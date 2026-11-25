@@ -220,6 +220,7 @@ export type Action =
   | { kind: 'resume' }
   | { kind: 'limit'; pool: string; n: number }
   | { kind: 'priority'; task: string; n: number }
+  | { kind: 'unblock'; task: string }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
@@ -247,6 +248,7 @@ export const HELP = [
   '/autonomous decide D-ID KEY [메모] 사용자 결정 기록',
   '/autonomous pause [사유] | resume  새 배정만 멈춤 / 재개 (실행 중인 에이전트는 계속)',
   '/autonomous limit POOL N | priority ID N',
+  '/autonomous unblock ID            보류 해제 (sched.py가 재작업·준비 상태로 되돌린다)',
 ]
 
 export const parseCommand = (args: string): Action => {
@@ -282,6 +284,10 @@ export const parseCommand = (args: string): Action => {
     const [id, choice, ...note] = rest
     if (!id || !ID.test(id) || !choice) return { kind: 'error', message: '/autonomous decide D-1 A [메모]' }
     return { kind: 'decide', id, choice, note: note.join(' ') }
+  }
+  if (head === 'unblock') {
+    const [task] = rest
+    return task && ID.test(task) ? { kind: 'unblock', task } : { kind: 'error', message: '/autonomous unblock ID' }
   }
   if (head === 'pause') return { kind: 'pause', reason: rest.join(' ') }
   if (head === 'resume') return { kind: 'resume' }
@@ -329,6 +335,12 @@ export const schedArgs = (a: Action, snap: Snapshot | null): { args: string[] } 
       if (d.state !== 'OPEN') return { error: `${a.id}는 이미 ${d.state}다` }
       if (!d.options.some(o => o.key === a.choice)) return { error: `선택지가 아니다: ${a.choice} (${d.options.map(o => o.key).join(', ')})` }
       return { args: ['decide', 'answer', a.id, `--choice=${a.choice}`, '--by', 'tui', ...(a.note ? [`--note=${a.note}`] : [])] }
+    }
+    case 'unblock': {
+      const t = task(a.task)
+      if (!t) return { error: `스냅샷에 작업이 없다: ${a.task}` }
+      if (t.state !== 'BLOCKED') return { error: `${a.task}는 보류 상태가 아니다(${t.state})` }
+      return { args: ['unblock', a.task, '--reason=TUI에서 보류 해제'] }
     }
     case 'pause':
       return { args: ['pause', `--reason=${a.reason || 'TUI에서 일시 중지'}`] }
@@ -400,11 +412,17 @@ export const previewTarget = (snap: Snapshot | null, task: string | null, versio
   return { file: v.file, label: `${task} v${v.n}` }
 }
 
-/** 기본 브라우저로 파일을 여는 명령. 셸을 거치지 않는다. */
-export const openerArgv = (sysname: string, file: string): string[] | null => {
-  if (sysname === 'Windows_NT') return ['explorer.exe', file.replace(/\//g, '\\')]
-  if (sysname === 'Darwin') return ['open', file]
-  if (sysname === 'Linux' || sysname.endsWith('BSD')) return ['xdg-open', file]
+/**
+ * 기본 브라우저로 파일을 여는 명령 후보(앞에서부터 시도). 셸을 거치지 않는다.
+ * Windows는 설정의 PATH에 C:\\Windows가 빠져 있어도 열리게 절대 경로를 다음 후보로 둔다.
+ */
+export const openerArgv = (sysname: string, file: string): string[][] | null => {
+  if (sysname === 'Windows_NT') {
+    const f = file.replace(/\//g, '\\')
+    return [['explorer.exe', f], ['C:\\Windows\\explorer.exe', f]]
+  }
+  if (sysname === 'Darwin') return [['open', file]]
+  if (sysname === 'Linux' || sysname.endsWith('BSD')) return [['xdg-open', file]]
   return null
 }
 

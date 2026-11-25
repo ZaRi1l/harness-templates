@@ -170,8 +170,9 @@ test('미리보기 경로와 브라우저 명령', async () => {
   expect('error' in C.previewTarget(SNAP, 'API', null)).toBe(true)
   expect(C.isInside('C:\\R\\.git\\claude-auto\\previews\\UI\\v1.html', 'c:/r/.git/claude-auto/previews', true)).toBe(true)
   expect(C.isInside('/repo/.git/claude-auto/previews-evil/x.html', '/repo/.git/claude-auto/previews', false)).toBe(false)
-  expect(C.openerArgv('Windows_NT', 'C:/a b/v1.html')).toEqual(['explorer.exe', 'C:\\a b\\v1.html'])
-  expect(C.openerArgv('Linux', '/a/v1.html')).toEqual(['xdg-open', '/a/v1.html'])
+  // PATH에 C:\Windows가 없는 설정에서도 열리게 절대 경로를 다음 후보로 둔다
+  expect(C.openerArgv('Windows_NT', 'C:/a b/v1.html')).toEqual([['explorer.exe', 'C:\\a b\\v1.html'], ['C:\\Windows\\explorer.exe', 'C:\\a b\\v1.html']])
+  expect(C.openerArgv('Linux', '/a/v1.html')).toEqual([['xdg-open', '/a/v1.html']])
 })
 
 test('슬롯 점유와 실제 실행을 구분한다', async () => {
@@ -201,11 +202,11 @@ type Calls = { argv: string[][]; live: { snap: Snapshot | string; mtime: number 
 // 엔진은 realPath를 실행 중인 OS의 표기로 돌려준다(Windows면 D:\repo\...). 비교할 때는 / 로 맞춘다.
 const slash = (a: string[] | undefined) => a?.map(x => x.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))
 
-const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean } = {}): Calls => {
+const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boolean; sysname?: string; noPathExplorer?: boolean } = {}): Calls => {
   const calls: Calls = { argv: [], live: { snap, mtime: 1 }, clock: mock.clock(on) }
   on('command.register', () => ({ value: { command: 'autonomous' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('session.machine', () => ({ value: { sysname: 'Linux', release: '6', machine: 'x86_64', packageManagers: [], runtimes: [] } }))
+  on('session.machine', () => ({ value: { sysname: opts.sysname ?? 'Linux', release: '6', machine: 'x86_64', packageManagers: [], runtimes: [] } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('agent.list', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -215,6 +216,7 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
   on('process.run', (_, e) => {
     calls.argv.push([...e.argv])
     if (opts.gitFails && e.argv[0] === 'git') throw new Error('spawn git ENOENT')
+    if (opts.noPathExplorer && e.argv[0] === 'explorer.exe') throw new Error('spawn explorer.exe ENOENT')
     const out = e.argv[0] === 'git' ? `${ROOT}/.git\n` : '{}'
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -390,4 +392,42 @@ test('긴 설명은 낱말 단위로 줄을 나누고 넘치면 …로 끝낸다
   const cut = C.wrapText('가 나 다 라 마 바 사 아', 6, 2)
   expect(cut.length).toBe(2)
   expect(cut[1]?.endsWith('…')).toBe(true)
+})
+
+test('보류 해제: 명령과 sched 인수, BLOCKED가 아니면 거부한다', async () => {
+  expect(C.parseCommand('unblock CORE')).toEqual({ kind: 'unblock', task: 'CORE' })
+  expect(C.parseCommand('unblock').kind).toBe('error')
+  const blocked = { ...SNAP, tasks: SNAP.tasks.map(t => (t.id === 'API' ? { ...t, state: 'BLOCKED' as const, reason: '환경' } : t)) }
+  expect(C.schedArgs({ kind: 'unblock', task: 'API' }, blocked)).toEqual({ args: ['unblock', 'API', '--reason=TUI에서 보류 해제'] })
+  expect('error' in C.schedArgs({ kind: 'unblock', task: 'API' }, SNAP)).toBe(true)
+})
+
+test('작업 탭: 보류된 작업을 펼치면 보류 해제 버튼이 있다', async ($, on) => {
+  const blocked = { ...SNAP, counts: { ...SNAP.counts, BLOCKED: 1 }, tasks: SNAP.tasks.map(t => (t.id === 'API' ? { ...t, state: 'BLOCKED' as const, reason: '환경' } : t)) }
+  const calls = engine(on, blocked)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-tasks' })
+  expect(await ui.find({ key: 'unblock-API' })).toBeUndefined() // 펼치기 전에는 없다
+  await ui.press({ key: 'q-API' })
+  await ui.press({ key: 'unblock-API' })
+  expect(calls.argv.find(a => a.includes('unblock'))?.slice(-3)).toEqual(['unblock', 'API', '--reason=TUI에서 보류 해제'])
+  await ui.unmount()
+})
+
+test('탭 이름에 단축키 숫자를 겹쳐 쓰지 않는다', async ($, on) => {
+  engine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const texts = (await ui.findAll({ type: 'Text', text: /현황/ })).map(x => x.text)
+  expect(texts.some(t => /\d\s*현황/.test(t))).toBe(false)
+  await ui.unmount()
+})
+
+test('Windows: PATH에 explorer.exe가 없어도 절대 경로로 열고, 실패 경로는 자르지 않는다', async ($, on) => {
+  const calls = engine(on, SNAP, { sysname: 'Windows_NT', noPathExplorer: true })
+  await start($)
+  const r = await command($, 'preview UI v2')
+  expect(r.text).toContain('기본 브라우저')
+  expect(calls.argv.some(a => a[0] === 'C:\\Windows\\explorer.exe')).toBe(true)
 })
