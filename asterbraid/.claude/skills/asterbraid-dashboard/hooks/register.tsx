@@ -558,6 +558,17 @@ export const register: Register = (on, options) => {
               <Text dimColor>{snap.away ? '복귀하면 자리 비운 동안 정한 것을 4번 탭에서 확인한다' : '화면·방향 결정은 추천안으로 정하고 계속한다. 의존성·호환 깨짐·환경·데이터는 기다린다'}</Text>
             </Box>
           )}
+          {can && line(C.section('설계 검토 (큰 설계를 다른 검토자가 먼저 본다)', W))}
+          {can && (
+            <Box columnGap={1} flexWrap="wrap">
+              {C.REVIEW_MODES.map(m => (
+                (snap.design_review_mode ?? 'deep') === m
+                  ? <Button key={`review-${m}`} label={`● ${C.REVIEW_LABEL[m]}`} variant="primary" onPress={() => act($, { kind: 'reviewMode', mode: m })} />
+                  : <Button key={`review-${m}`} label={C.REVIEW_LABEL[m] ?? m} plain onPress={() => act($, { kind: 'reviewMode', mode: m })} />
+              ))}
+              <Text dimColor>deep 설계는 검토 PASS 뒤 구현한다. 묻기면 manager가 매번 결정으로 묻는다</Text>
+            </Box>
+          )}
           {can && line(C.section('동시 실행 한도', W))}
           {can && (
             <Box flexWrap="wrap" columnGap={3}>
@@ -592,21 +603,30 @@ export const register: Register = (on, options) => {
           <Button key="open-dashboard" label="미리보기 대시보드 열기(브라우저)" onPress={async () => setView($, v => ({ ...v, lastAction: 'ℹ ' }))
             .then(() => openPreview($, null, null))
             .then(text => setView($, v => ({ ...v, lastAction: `ℹ ${C.fit(text, 100)}` })))} />
-          {C.pendingAway(snap).length > 0 && <Text bold color="suggestion">{`☾ 자리 비운 동안 자동으로 정한 것 ${C.pendingAway(snap).length}건`}</Text>}
-          {C.pendingAway(snap).map(x => {
-            const open = view.expanded === `away:${x.key}`
-            return (
-              <Box key={`aw-${x.key}`} flexDirection="column" marginBottom={1}>
-                {lines(C.awayLines(snap, x, W, open))}
-                <Box columnGap={1} flexWrap="wrap">
-                  {can && <Button key={`keep-${x.key}`} label="이대로 둠" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: false })} />}
-                  {can && x.kind === 'decision' && <Button key={`redo-${x.key}`} label="다시 정하기" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: true })} />}
-                  {x.kind === 'decision' && <Button key={`more-${x.key}`} label={open ? '접기' : '자세히'} onPress={() => setView($, v => ({ ...v, expanded: open ? null : `away:${x.key}` }))} />}
-                  {x.kind === 'preview' && x.version && <Button key={`open-aw-${x.key}`} label={`열기 v${x.version}`} onPress={() => openPreview($, x.key, x.version ?? null).then(say)} />}
+          <Text bold color="claude">사용자 결정 {open.length}건</Text>
+          {open.length === 0 && <Text dimColor>열린 결정이 없다</Text>}
+          {open.map(d => (
+            <Box key={`dec-${d.id}`} flexDirection="column" marginBottom={1}>
+              {line([{ text: `? ${d.id} `, tone: 'warn', bold: true }, { text: d.title }, { text: ` · ${d.kind} · 작업 ${d.tasks.join(',') || '-'}`, tone: 'dim' },
+                ...(d.hold === 'merge' ? [{ text: ' · 통합만 대기(구현은 진행)', tone: 'info' as C.Tone }] : []),
+                ...(d.ask_user ? [{ text: ' · 직접 정함', tone: 'warn' as C.Tone }] : [])])}
+              <Text wrap="wrap">{d.question}</Text>
+              {d.options.map(o => (
+                <Box key={`opt-${d.id}-${o.key}`} flexDirection="column">
+                  {line([{ text: `  ${o.key}${o.key === d.recommend ? ' ★추천' : ''} `, bold: true, tone: o.key === d.recommend ? 'ok' : 'plain' }, { text: o.label }])}
+                  {(o.pros || o.cons) && line([{ text: `    + ${o.pros || '-'}  − ${o.cons || '-'}`, tone: 'dim' }])}
                 </Box>
-              </Box>
-            )
-          })}
+              ))}
+              {d.why && <Text dimColor wrap="wrap">추천 이유: {d.why}</Text>}
+              {can && (
+                <Box columnGap={1} flexWrap="wrap">
+                  {d.options.map(o => (
+                    <Button key={`pick-${d.id}-${o.key}`} label={`${o.key} 선택`} onPress={() => act($, { kind: 'decide', id: d.id, choice: o.key, note: '' })} />
+                  ))}
+                </Box>
+              )}
+            </Box>
+          ))}
           <Text bold color="claude">미리보기 검토 {waiting.length}건</Text>
           {waiting.length === 0 && <Text dimColor>검토를 기다리는 미리보기가 없다</Text>}
           {waiting.map(t => {
@@ -642,28 +662,29 @@ export const register: Register = (on, options) => {
               </Box>
             )
           })}
-          <Text bold color="claude">사용자 결정 {open.length}건</Text>
-          {open.length === 0 && <Text dimColor>열린 결정이 없다</Text>}
-          {open.map(d => (
-            <Box key={`dec-${d.id}`} flexDirection="column" marginBottom={1}>
-              {line([{ text: `? ${d.id} `, tone: 'warn', bold: true }, { text: d.title }, { text: ` · ${d.kind} · 작업 ${d.tasks.join(',') || '-'}`, tone: 'dim' }])}
-              <Text wrap="wrap">{d.question}</Text>
-              {d.options.map(o => (
-                <Box key={`opt-${d.id}-${o.key}`} flexDirection="column">
-                  {line([{ text: `  ${o.key}${o.key === d.recommend ? ' ★추천' : ''} `, bold: true, tone: o.key === d.recommend ? 'ok' : 'plain' }, { text: o.label }])}
-                  {(o.pros || o.cons) && line([{ text: `    + ${o.pros || '-'}  − ${o.cons || '-'}`, tone: 'dim' }])}
-                </Box>
-              ))}
-              {d.why && <Text dimColor wrap="wrap">추천 이유: {d.why}</Text>}
-              {can && (
-                <Box columnGap={1} flexWrap="wrap">
-                  {d.options.map(o => (
-                    <Button key={`pick-${d.id}-${o.key}`} label={`${o.key} 선택`} onPress={() => act($, { kind: 'decide', id: d.id, choice: o.key, note: '' })} />
-                  ))}
-                </Box>
-              )}
+          {C.pendingAway(snap).length > 0 && (
+            <Box columnGap={1} flexWrap="wrap">
+              <Text bold color="suggestion">{`☾ 자리 비운 동안 자동으로 정한 것 ${C.pendingAway(snap).length}건`}</Text>
+              {can && <Button key="keep-all" label="모두 이대로 둠" onPress={async () => { for (const x of C.pendingAway(snap)) await act($, { kind: 'awayReview', key: x.key, redo: false }) }} />}
             </Box>
-          ))}
+          )}
+          {(view.expanded === 'away-all' ? C.pendingAway(snap) : C.pendingAway(snap).slice(-C.AWAY_SHOWN)).map(x => {
+            const open = view.expanded === `away:${x.key}`
+            return (
+              <Box key={`aw-${x.key}`} flexDirection="column" marginBottom={1}>
+                {lines(C.awayLines(snap, x, W, open))}
+                <Box columnGap={1} flexWrap="wrap">
+                  {can && <Button key={`keep-${x.key}`} label="이대로 둠" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: false })} />}
+                  {can && x.kind === 'decision' && <Button key={`redo-${x.key}`} label="다시 정하기" onPress={() => act($, { kind: 'awayReview', key: x.key, redo: true })} />}
+                  {x.kind === 'decision' && <Button key={`more-${x.key}`} label={open ? '접기' : '자세히'} onPress={() => setView($, v => ({ ...v, expanded: open ? null : `away:${x.key}` }))} />}
+                  {x.kind === 'preview' && x.version && <Button key={`open-aw-${x.key}`} label={`열기 v${x.version}`} onPress={() => openPreview($, x.key, x.version ?? null).then(say)} />}
+                </Box>
+              </Box>
+            )
+          })}
+          {C.pendingAway(snap).length > C.AWAY_SHOWN && (
+            <Button key="away-all" label={view.expanded === 'away-all' ? '최근 것만 보기' : `모두 보기 (${C.pendingAway(snap).length}건)`} onPress={() => setView($, v => ({ ...v, expanded: v.expanded === 'away-all' ? null : 'away-all' }))} />
+          )}
         </Box>
       )
     }
@@ -698,7 +719,7 @@ export const register: Register = (on, options) => {
                   </Button>
                   {can && view.expanded === r.id && (() => {
                     const t = snap.tasks.find(x => x.id === r.id)
-                    return t && t.state !== 'COMPLETED' && t.state !== 'CANCELLED' ? (
+                    return t && C.canReprioritize(t) ? (
                       <Box columnGap={1}>
                         <Text>{`   우선순위 p${t.priority}`}</Text>
                         <Button key={`pri-up-${t.id}`} label="▲" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority + 1 })} />

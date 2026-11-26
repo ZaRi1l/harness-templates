@@ -31,6 +31,9 @@ export type SnapTask = {
   cleaned: boolean | null
   /** 설계 깊이(light|standard|deep). 설계가 필요 없으면 null, 옛 스냅샷에는 없다 */
   design_depth?: string | null
+  design_review?: { verdict: string; by: string | null; at: string; notes?: string; decision?: string } | null
+  review_pending?: boolean
+  verifiers_assigned?: string[]
   /** 조사·설계 노트 경로(sched done --notes) */
   notes?: string[]
   /** 첫 배정 시각(걸린 시간 계산). 옛 스냅샷에는 없다 */
@@ -65,6 +68,8 @@ export type Decision = {
   note: string | null
   by: string | null
   answered_at: string | null
+  hold?: 'start' | 'merge'
+  ask_user?: boolean
 }
 
 export type Snapshot = {
@@ -79,6 +84,7 @@ export type Snapshot = {
   away?: { at: string; previews: boolean; reason: string } | null
   /** 자리 비움 중 추천안으로 정한 것. reviewed: null(확인 전) | keep | redo:<새 결정 ID> */
   away_log?: AwayEntry[]
+  design_review_mode?: string
   total: number
   completed: number
   counts: Record<string, number>

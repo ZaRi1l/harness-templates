@@ -786,3 +786,49 @@ test('활동: 긴 줄은 다음 줄로 넘긴다', async () => {
   expect(out.length).toBe(2)
   expect(out[1]?.startsWith(' '.repeat(12))).toBe(true)
 })
+
+test('e2e5: 작업 탭은 긴 ID를 자르지 않고, 우선순위는 배정 전 작업에만', async () => {
+  const snap = { ...SNAP, tasks: [task({ id: 'BUDGET-OVERFLOW', title: '예산 초과 강조' }), ...SNAP.tasks] }
+  const rows = C.queueLines(snap, 'all', null, 120).map(r => r.line.map(s => s.text).join(''))
+  expect(rows.some(t => t.includes('BUDGET-OVERFLOW '))).toBe(true)
+  expect(C.canReprioritize(task({ state: 'READY' }))).toBe(true)
+  expect(C.canReprioritize(task({ state: 'BLOCKED' }))).toBe(true)
+  expect(C.canReprioritize(task({ state: 'IMPLEMENTING' }))).toBe(false)
+  expect(C.canReprioritize(task({ state: 'VERIFYING' }))).toBe(false)
+})
+
+test('e2e5: 아무것도 돌지 않고 2분 넘게 그대로면 머리말에 멈춘 이유를 보인다', async () => {
+  const at = C.ms(SNAP.generated_at) ?? 0
+  const idle = { ...SNAP, slots: { ...SNAP.slots, implement: { used: 0, limit: 3 } },
+    tasks: [task({ id: 'R', state: 'RETRY', runnable: false, pool: null }), task({ id: 'UI', state: 'AWAITING_APPROVAL', runnable: false, pool: null })] }
+  expect(C.stuckReason(idle, [], at + 60_000)).toBeNull() // 2분 전에는 말하지 않는다
+  const why = C.stuckReason(idle, [], at + 3 * 3600_000) ?? ''
+  expect(why).toContain('결정 D-1')
+  expect(why).toContain('승인 UI')
+  expect(C.stuckReason(idle, [run({ status: 'running' })], at + 3 * 3600_000)).toBeNull() // 무언가 돌면 멈춘 게 아니다
+  expect(C.stuckReason({ ...idle, tasks: [...idle.tasks, task({ id: 'GO', runnable: true })] }, [], at + 3 * 3600_000)).toBeNull()
+  const head = C.headerLines(idle, { ...C.EMPTY_META, checkedMs: at }, [], at + 3 * 3600_000, [], 120, 1000).map(l => l.map(s => s.text).join(''))
+  expect(head.some(t => t.startsWith('■ 멈춤 3h'))).toBe(true)
+})
+
+test('설계 검토: marker의 review 풀을 잇고, review 명령은 off|deep|ask만', async () => {
+  expect(C.parseCommand('review ask')).toEqual({ kind: 'reviewMode', mode: 'ask' })
+  expect(C.parseCommand('review maybe').kind).toBe('error')
+  expect(C.schedArgs({ kind: 'reviewMode', mode: 'off' }, SNAP)).toEqual({ args: ['review-mode', 'off'] })
+  expect(C.POOL_LABEL.review).toBe('설계 검토')
+})
+
+test('승인·결정 탭: 자동으로 정한 것은 최근 3건만 보이고, 모두 보기·모두 이대로 둠', async ($, on) => {
+  const log = ['D-a', 'D-b', 'D-c', 'D-d', 'D-e'].map(k => ({ at: '', kind: 'decision' as const, key: k, text: `${k}: A`, reviewed: null }))
+  const calls = engine(on, { ...SNAP, away_log: log })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-decisions' })
+  expect(await ui.find({ type: 'Button', key: 'keep-D-e' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'keep-D-a' })).toBeUndefined() // 접혀 있다
+  await ui.press({ key: 'away-all' })
+  expect(await ui.find({ type: 'Button', key: 'keep-D-a' })).toBeDefined()
+  await ui.press({ key: 'keep-all' })
+  expect(calls.argv.filter(a => a.includes('away-review')).length).toBe(5)
+  await ui.unmount()
+})

@@ -10,8 +10,14 @@ export const FILTERS: readonly QueueFilter[] = ['all', 'active', 'waiting', 'blo
 export const FILTER_LABEL: Record<QueueFilter, string> = { all: '전체', active: '진행', waiting: '대기', blocked: '보류', done: '완료' }
 export const POOLS = ['research', 'design', 'preview', 'implement'] as const
 export const POOL_LABEL: Record<string, string> = {
-  research: '조사', design: '설계', preview: '미리보기', implement: '구현', verify: '검증', merge: '통합',
+  research: '조사', design: '설계', review: '설계 검토', preview: '미리보기', implement: '구현', verify: '검증', merge: '통합',
 }
+export const REVIEW_MODES = ['off', 'deep', 'ask'] as const
+export const AWAY_SHOWN = 3 // 승인·결정 탭: 자동으로 정한 것은 최근 3건만(쌓이면 답할 것이 밀린다)
+export const REVIEW_LABEL: Record<string, string> = { off: '끔', deep: 'deep 설계만', ask: 'deep마다 묻기' }
+/** 우선순위는 배정 순서에만 쓰인다. 이미 배정된(진행 중) 작업에는 효과가 없어 버튼을 보이지 않는다. */
+export const PRIORITY_STATES = ['PENDING', 'READY', 'AWAITING_APPROVAL', 'RETRY', 'BLOCKED']
+export const canReprioritize = (t: SnapTask) => PRIORITY_STATES.includes(t.state)
 export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, filter: 'all', taskMode: 'list', expanded: null, errorsOnly: false, showDone: false, showDoneTasks: false, pendingRevise: null, lastAction: null }
 export const EMPTY_META: SnapMeta = { root: null, stateDir: null, readAtMs: 0, checkedMs: 0, mtimeMs: 0, error: null, stale: false }
 
@@ -88,7 +94,7 @@ export const parseSnapshot = (text: string): { snap: Snapshot } | { error: strin
 
 // ---------------------------------------------------------------- 에이전트 ↔ 작업 연결
 
-const MARKER = /^\s*\[auto-task id=([A-Za-z0-9][A-Za-z0-9_.-]{0,63}) pool=(research|design|preview|implement|verify|merge) attempt=(\d{1,6})\]/m
+const MARKER = /^\s*\[auto-task id=([A-Za-z0-9][A-Za-z0-9_.-]{0,63}) pool=(research|design|review|preview|implement|verify|merge) attempt=(\d{1,6})\]/m
 
 /** 지시문 앞부분의 marker만 믿는다. 역할 이름이 같다는 이유로 작업을 추측해 잇지 않는다. */
 export const parseMarker = (prompt: string): { task: string; pool: string; attempt: number } | null => {
@@ -239,6 +245,7 @@ export type Action =
   | { kind: 'away'; previews: boolean }
   | { kind: 'back' }
   | { kind: 'awayReview'; key: string; redo: boolean }
+  | { kind: 'reviewMode'; mode: string }
   | { kind: 'rate'; seconds: number }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
@@ -270,6 +277,7 @@ export const HELP = [
   '/asterbraid unblock ID            보류 해제 (sched.py가 재작업·준비 상태로 되돌린다)',
   '/asterbraid away [previews] | back  자리 비움(화면·방향 결정은 추천안, previews면 미리보기도 자동 승인) / 복귀',
   '/asterbraid rate 1|2|5|10         화면 갱신 간격(초)',
+  '/asterbraid review off|deep|ask   설계 검토(deep 설계를 다른 검토자가 PASS해야 구현) 끔 / 켬 / 매번 묻기',
 ]
 
 /** 갱신 간격 단계(초). − + 버튼은 한 단계씩 움직이고 끝에서 멈춘다. */
@@ -323,6 +331,10 @@ export const parseCommand = (args: string): Action => {
   if (head === 'rate') {
     const k = Number(rest[0])
     return (RATES as readonly number[]).includes(k) ? { kind: 'rate', seconds: k } : { kind: 'error', message: '/asterbraid rate 1|2|5|10' }
+  }
+  if (head === 'review') {
+    const m = rest[0] ?? ''
+    return (REVIEW_MODES as readonly string[]).includes(m) ? { kind: 'reviewMode', mode: m } : { kind: 'error', message: '/asterbraid review off|deep|ask' }
   }
   if (head === 'pause') return { kind: 'pause', reason: rest.join(' ') }
   if (head === 'resume') return { kind: 'resume' }
@@ -387,6 +399,8 @@ export const schedArgs = (a: Action, snap: Snapshot | null): { args: string[] } 
       if (a.redo && e.kind !== 'decision') return { error: '미리보기는 다시 정하기를 지원하지 않는다. manager에게 수정을 요청한다' }
       return { args: ['away-review', a.key, a.redo ? '--redo' : '--keep'] }
     }
+    case 'reviewMode':
+      return (REVIEW_MODES as readonly string[]).includes(a.mode) ? { args: ['review-mode', a.mode] } : { error: `설계 검토 설정은 ${REVIEW_MODES.join('|')}다` }
     case 'pause':
       return { args: ['pause', `--reason=${a.reason || 'TUI에서 일시 중지'}`] }
     case 'resume':
@@ -704,6 +718,22 @@ export const wrapText = (s: string, w: number, maxLines: number): string[] => {
  * 모든 탭 위에 놓는 머리말. 오른쪽 위 회전 표시는 Mod가 스냅샷 파일을 확인할 때마다 한 칸 돈다.
  * 숫자가 그대로여도 표시가 돌면 자동 갱신이 살아 있다는 뜻이다.
  */
+/** 아무것도 돌지 않고 시작할 것도 없이 2분 넘게 그대로면 왜 멈췄는지(e2e5: 밤새 13시간 멈춘 것을 아침에야 알았다). */
+export const STUCK_MS = 120_000
+export const stuckReason = (snap: Snapshot, runs: Run[], now: number): string | null => {
+  const live = snap.tasks.filter(t => t.state !== 'COMPLETED' && t.state !== 'CANCELLED')
+  if (!live.length || runningRuns(runs).length || slotUsed(snap) || snap.tasks.some(t => t.runnable)) return null
+  const at = ms(snap.generated_at)
+  if (at === null || now - at < STUCK_MS) return null
+  const dec = openDecisions(snap).map(d => d.id)
+  const wait = awaiting(snap).map(t => t.id)
+  const parts = [...(dec.length ? [`결정 ${dec.join(',')}`] : []), ...(wait.length ? [`승인 ${wait.join(',')}`] : [])]
+  if (parts.length) return `사용자 답 필요: ${parts.join(' · ')}  → 4 승인·결정 탭`
+  const blocked = live.filter(t => t.state === 'BLOCKED').map(t => t.id)
+  if (blocked.length === live.length) return `남은 작업이 모두 보류: ${blocked.join(',')}  → 2 작업 탭`
+  return 'manager가 다음 일을 배정하지 않고 있다(manager 창 확인)'
+}
+
 export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: number, warns: Anomaly[], width: number, refreshMs: number, usage: Usage | null = null): Line[] => {
   const p = progress(snap)
   const live: Seg = meta.stale
@@ -727,6 +757,8 @@ export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: nu
     // 메인 세션(manager)의 컨텍스트. 값을 못 받으면 숨긴다
     ...(usage?.contextPct != null ? [{ text: ` · 컨텍스트 ${Math.round(usage.contextPct)}%`, tone: (usage.contextPct >= 80 ? 'warn' : 'dim') as Tone, bold: usage.contextPct >= 80 }] : []),
   ])
+  const stuck = stuckReason(snap, runs, now)
+  if (stuck) lines.push([{ text: `■ 멈춤 ${fmtDur(now - (ms(snap.generated_at) ?? now))}째 — ${stuck}`, tone: 'err', bold: true }])
   if (snap.away) lines.push([{ text: `☾ 자리 비움 중${snap.away.previews ? ' · 미리보기 자동 승인' : ''}`, tone: 'info', bold: true }, { text: '  → 7 명령 탭에서 복귀', tone: 'dim' }])
   else if (pendingAway(snap).length) lines.push([{ text: `☾ 자리 비운 동안 정한 것 ${pendingAway(snap).length}건 확인`, tone: 'info', bold: true }, { text: '  → 4 승인·결정 탭', tone: 'dim' }])
   const wait = awaiting(snap).length
@@ -830,12 +862,13 @@ export const queueLines = (snap: Snapshot, filter: QueueFilter, expanded: string
   const out: Row[] = []
   const push = (line: Line, id?: string) => out.push({ line: fitLine(line, width), id })
   const open = filter === 'done' || showDone
+  const idW = Math.min(32, Math.max(4, ...matched.map(t => strWidth(t.id)))) + 1 // ID는 자르지 않고 제목을 줄인다
   const draw = (t: SnapTask) => {
     const m = mark(t.state)
     const cost = t.state === 'COMPLETED' ? costText(t, tok) : ''
     push([
       { text: `${m.mark} `, tone: m.tone },
-      { text: pad(t.id, 10), bold: true },
+      { text: pad(t.id, idW), bold: true },
       { text: pad(m.label, 8), tone: m.tone },
       { text: `p${t.priority} ${t.risk}/${t.profile} ↻${t.retries} `, tone: 'dim' },
       ...(t.profile === 'fast' ? [{ text: '작게 ', tone: 'accent' as Tone }] : []),
