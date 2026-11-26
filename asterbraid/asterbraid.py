@@ -4,11 +4,13 @@
   uv run --no-project python asterbraid/asterbraid.py install <프로젝트 폴더> [--yes]
   uv run --no-project python asterbraid/asterbraid.py update  <프로젝트 폴더> [--yes]
   uv run --no-project python asterbraid/asterbraid.py check   <프로젝트 폴더>
+  uv run --no-project python asterbraid/asterbraid.py rollback <프로젝트 폴더> [--yes]   직전 install·update를 되돌린다
 
 바꿀 내용을 보여 주고, 터미널이면 적용할지 묻는다(입력을 받을 수 없으면 보여 주기만 한다). --yes(--apply)는 묻지 않고 적용한다. 하네스 파일(agents·hooks·skills·.claude/asterbraid.md)은 복사하고,
 프로젝트 파일은 합친다: settings.json(기존 값 유지, 하네스 권한·Hook만 추가), .gitignore(빠진 줄만),
 CLAUDE.md(없으면 템플릿, 있으면 끝에 `@.claude/asterbraid.md` 한 줄). 같은 이름의 다른 파일은 덮지 않는다.
 설치한 파일의 해시를 .claude/asterbraid.lock.json에 남겨, update는 사용자가 고치지 않은 하네스 파일만 바꾼다.
+바꾸기 전 원본을 .claude/asterbraid.backup/<시각>/에 남기고, 중간에 실패하면 원래대로 되돌린다(최근 3개 보관).
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
+from datetime import datetime
 import sys
 from pathlib import Path
 
@@ -26,7 +30,9 @@ LOCK = ".claude/asterbraid.lock.json"
 IMPORT = "@.claude/asterbraid.md"
 PROJECT_OWNED = {".claude/settings.json", ".claude/hooks/verify.config.json", ".claude/hooks/auto.config.json"}
 SKIP_PARTS = {"__pycache__", "node_modules", "worktrees"}
-GITIGNORE = [".claude/settings.local.json", ".claude/worktrees/", ".playwright-cli/"]
+BACKUP = ".claude/asterbraid.backup"
+BACKUPS_KEPT = 3
+GITIGNORE = [".claude/settings.local.json", ".claude/worktrees/", ".playwright-cli/", BACKUP + "/"]
 
 
 class Refused(Exception):
@@ -43,7 +49,7 @@ def harness_files() -> dict:
     for p in sorted((TEMPLATE / ".claude").rglob("*")):
         rel = p.relative_to(TEMPLATE).as_posix()
         if p.is_file() and rel not in PROJECT_OWNED and not SKIP_PARTS & set(p.parts) \
-                and "/.claude-plugin/types/" not in rel and rel != LOCK:
+                and "/.claude-plugin/types/" not in rel and rel != LOCK and not rel.startswith(BACKUP + "/"):
             out[rel] = p
     return out
 
@@ -149,19 +155,90 @@ def plan(target: Path, mode: str) -> tuple[list, dict]:
 
 
 def apply(target: Path, acts: list, lock: dict) -> None:
-    for act in acts:
-        kind, rel = act[0], act[1]
-        dst = target / rel
-        if kind == "copy":
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_bytes((TEMPLATE / rel).read_bytes())
-        elif kind == "write":
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            with dst.open("w", encoding="utf-8", newline="") as fh:  # 줄바꿈을 그대로 둔다(Path.write_text의 newline은 3.10부터)
-                fh.write(act[3])
-        elif kind == "remove":
-            dst.unlink()
-    (target / LOCK).write_text(json.dumps(lock, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    """바꾸기 전 원본을 백업하고 적용한다. 하나라도 실패하면 백업으로 모두 되돌린다(섞인 버전으로 남지 않게)."""
+    text = json.dumps(lock, ensure_ascii=False, indent=1) + "\n"
+    changes = [x[1] for x in acts if x[0] in ("copy", "write", "remove")]
+    if not changes:  # 바꿀 파일이 없으면 백업도 남기지 않는다
+        if not (target / LOCK).is_file() or (target / LOCK).read_text(encoding="utf-8") != text:
+            (target / LOCK).write_text(text, encoding="utf-8")
+        return
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    bdir = target / BACKUP / stamp
+    touched = changes + [LOCK]
+    manifest = {"at": stamp, "existed": [], "created": []}
+    for rel in touched:
+        src = target / rel
+        if src.is_file():
+            (bdir / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src), str(bdir / rel))
+            manifest["existed"].append(rel)
+        else:
+            manifest["created"].append(rel)
+    bdir.mkdir(parents=True, exist_ok=True)
+    (bdir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
+    try:
+        for act in acts:
+            kind, rel = act[0], act[1]
+            dst = target / rel
+            if kind == "copy":
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes((TEMPLATE / rel).read_bytes())
+            elif kind == "write":
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                with dst.open("w", encoding="utf-8", newline="") as fh:  # 줄바꿈을 그대로 둔다(Path.write_text의 newline은 3.10부터)
+                    fh.write(act[3])
+            elif kind == "remove":
+                dst.unlink()
+        (target / LOCK).write_text(json.dumps(lock, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    except OSError as e:
+        restore(target, bdir)
+        raise Refused(f"적용 중 실패해 원래대로 되돌렸다({e}). 파일을 잡고 있는 프로그램(편집기·실행 중인 세션)을 닫고 다시 실행한다")
+    for old in sorted(x for x in (target / BACKUP).iterdir() if x.is_dir())[:-BACKUPS_KEPT]:
+        shutil.rmtree(str(old), ignore_errors=True)
+
+
+def restore(target: Path, bdir: Path) -> list:
+    """백업 하나로 되돌린다: 있던 파일은 원본으로, 새로 생긴 파일은 지운다."""
+    manifest = json.loads((bdir / "manifest.json").read_text(encoding="utf-8"))
+    done = []
+    for rel in manifest["existed"]:
+        (target / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(bdir / rel), str(target / rel))
+        done.append(f"원본으로: {rel}")
+    for rel in manifest["created"]:
+        if (target / rel).is_file():
+            (target / rel).unlink()
+            done.append(f"지움: {rel}")
+    return done
+
+
+def latest_backup(target: Path) -> Path:
+    base = target / BACKUP
+    dirs = sorted(x for x in base.iterdir() if (x / "manifest.json").is_file()) if base.is_dir() else []
+    if not dirs:
+        raise Refused("되돌릴 백업이 없다(.claude/asterbraid.backup/)")
+    return dirs[-1]
+
+
+def tool_warnings() -> list:
+    """4-17: Hook·sched가 쓰는 도구. 없으면 조용히 실패한다. 설치·PATH는 사용자가 한다(settings.json에 PATH를 넣지 않는다)."""
+    warns = []
+    if not shutil.which("git"):
+        warns.append("git이 PATH에 없다: Git을 설치하고 PATH에 넣는다")
+    uv = shutil.which("uv")
+    if not uv:
+        warns.append("uv가 PATH에 없다(Hook·sched가 `uv run`으로 돈다): https://docs.astral.sh/uv/ 로 설치하고 PATH에 넣는다. "
+                     "settings.json에 PATH를 넣지 않는다")
+    else:
+        try:
+            r = subprocess.run([uv, "run", "--no-project", "--offline", "python", "-c", "print(1)"],
+                               capture_output=True, text=True, timeout=60)
+            ok = r.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+        if not ok:
+            warns.append("`uv run --offline python`이 안 된다(받아 둔 Python이 없다): `uv python install 3.12`")
+    return warns
 
 
 def check(target: Path) -> int:
@@ -194,8 +271,42 @@ def check(target: Path) -> int:
         bad.append(f"CLAUDE.md에 `{IMPORT}`가 없다")
     for line in bad:
         print(f"✗ {line}")
+    for line in tool_warnings():
+        print(f"⚠ {line}")
     print("✓ 하네스 설치 상태 정상" if not bad else f"문제 {len(bad)}개. update로 고치거나 직접 합친다")
     return 1 if bad else 0
+
+
+def confirm() -> bool:
+    # Claude 등이 대신 실행하면 물을 수 없다. 보여 주기만 한다(Windows는 NUL 입력도 tty라 출력까지 본다)
+    if not (sys.stdin and sys.stdin.isatty() and sys.stdout.isatty()):
+        print("\n미리보기다. 적용하려면 같은 명령에 --yes를 붙인다(터미널에서 직접 실행하면 여기서 묻는다)")
+        return False
+    try:
+        answer = input("\n적용할까? [y/N] ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer not in ("y", "yes", "ㅛ"):
+        print("적용하지 않았다")
+        return False
+    return True
+
+
+def rollback(target: Path, yes: bool) -> int:
+    bdir = latest_backup(target)
+    m = json.loads((bdir / "manifest.json").read_text(encoding="utf-8"))
+    print(f"되돌릴 백업: {bdir.name}")
+    for rel in m["existed"]:
+        print(f"원본으로: {rel}")
+    for rel in m["created"]:
+        if (target / rel).is_file():
+            print(f"지움: {rel}")
+    if not yes and not confirm():
+        return 0
+    restore(target, bdir)
+    shutil.rmtree(str(bdir), ignore_errors=True)
+    print("\n되돌렸다. Claude 세션을 다시 연다")
+    return 0
 
 
 def main() -> int:
@@ -203,7 +314,7 @@ def main() -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["install", "update", "check"])
+    ap.add_argument("mode", choices=["install", "update", "check", "rollback"])
     ap.add_argument("target")
     ap.add_argument("--yes", "-y", "--apply", dest="apply", action="store_true", help="묻지 않고 적용한다")
     a = ap.parse_args()
@@ -215,6 +326,8 @@ def main() -> int:
             raise Refused("템플릿 저장소 자체에는 설치하지 않는다")
         if a.mode == "check":
             return check(target)
+        if a.mode == "rollback":
+            return rollback(target, a.apply)
         acts, lock = plan(target, a.mode)
     except Refused as e:
         print(f"[asterbraid] 거부: {e}", file=sys.stderr)
@@ -227,19 +340,13 @@ def main() -> int:
         print(f"{ {'copy': '복사', 'write': '수정', 'remove': '삭제', 'keep': '확인 필요'}[act[0]] }: {act[1]} — {act[2]}")
     if not acts:
         print("바꿀 것이 없다")
-    if not a.apply:
-        # Claude 등이 대신 실행하면 물을 수 없다. 보여 주기만 한다(Windows는 NUL 입력도 tty라 출력까지 본다)
-        if not (sys.stdin and sys.stdin.isatty() and sys.stdout.isatty()):
-            print("\n미리보기다. 적용하려면 같은 명령에 --yes를 붙인다(터미널에서 직접 실행하면 여기서 묻는다)")
-            return 0
-        try:
-            answer = input("\n적용할까? [y/N] ").strip().lower()
-        except EOFError:
-            answer = ""
-        if answer not in ("y", "yes", "ㅛ"):
-            print("적용하지 않았다")
-            return 0
-    apply(target, acts, lock)
+    if not a.apply and not confirm():
+        return 0
+    try:
+        apply(target, acts, lock)
+    except Refused as e:
+        print(f"[asterbraid] 거부: {e}", file=sys.stderr)
+        return 2
     print("\n적용했다. 다음: Claude 세션을 다시 열고(새 Hook·에이전트·Mod를 읽는다) `claude --agent manager`로 시작한다")
     return 0
 

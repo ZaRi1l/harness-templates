@@ -754,6 +754,72 @@ class TestInstaller(unittest.TestCase):
         self.assertEqual((self.target / ".claude/hooks/verify.config.json").read_text(encoding="utf-8"), "{}")  # 프로젝트 설정
         self.assertFalse((self.target / ".claude/agents/researcher.md").exists())
 
+    def load_tool(self, template=None):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("asterbraid_tool", (template or self.TEMPLATE) / "asterbraid.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def snapshot_files(self):
+        return {p.relative_to(self.target).as_posix(): p.read_bytes() for p in self.target.rglob("*")
+                if p.is_file() and "asterbraid.backup" not in p.parts}
+
+    def test_failed_update_is_rolled_back_and_can_run_again(self):
+        """5-20·5-22: 업데이트가 중간에 실패하면 섞인 버전으로 남지 않고 원래대로 돌아간다. 다시 실행하면 끝난다."""
+        import shutil
+        from unittest import mock
+        tpl = self.tmp / "tpl"
+        shutil.copytree(self.TEMPLATE, tpl)
+        self.ok("install", str(self.target), "--yes", template=tpl)
+        for rel in (".claude/agents/manager.md", ".claude/agents/verifier.md", ".claude/hooks/sched.py"):
+            with (tpl / rel).open("a", encoding="utf-8") as fh:
+                fh.write("\n# 새 버전\n")
+        before = self.snapshot_files()
+        tool = self.load_tool(tpl)
+        acts, lock = tool.plan(self.target, "update")
+        real, n = Path.write_bytes, {"k": 0}
+
+        def flaky(path, data):
+            n["k"] += 1
+            if n["k"] == 2:
+                raise PermissionError("다른 프로그램이 파일을 잡고 있다")
+            return real(path, data)
+
+        with mock.patch.object(Path, "write_bytes", flaky), self.assertRaises(tool.Refused) as cm:
+            tool.apply(self.target, acts, lock)
+        self.assertIn("되돌렸다", str(cm.exception))
+        self.assertEqual(self.snapshot_files(), before)  # 하나도 바뀌지 않았다
+        self.ok("update", str(self.target), "--yes", template=tpl)
+        self.assertTrue((self.target / ".claude/hooks/sched.py").read_text(encoding="utf-8").endswith("# 새 버전\n"))
+
+    def test_rollback_restores_previous_version(self):
+        import shutil
+        tpl = self.tmp / "tpl"
+        shutil.copytree(self.TEMPLATE, tpl)
+        self.ok("install", str(self.target), "--yes", template=tpl)
+        before = self.snapshot_files()
+        with (tpl / ".claude/agents/manager.md").open("a", encoding="utf-8") as fh:
+            fh.write("\n새 버전\n")
+        (tpl / ".claude/skills/asterbraid-procedures/NEW.md").write_text("새 파일\n", encoding="utf-8")
+        self.ok("update", str(self.target), "--yes", template=tpl)
+        self.assertNotEqual(self.snapshot_files(), before)
+        self.assertIn(".claude/asterbraid.backup/", (self.target / ".gitignore").read_text(encoding="utf-8"))
+        plan = self.ok("rollback", str(self.target), template=tpl)
+        self.assertIn("manager.md", plan)
+        self.ok("rollback", str(self.target), "--yes", template=tpl)
+        self.assertEqual(self.snapshot_files(), before)
+
+    def test_check_reports_missing_tools_as_warnings(self):
+        """4-17: git·uv가 없으면 Hook이 조용히 실패한다. check가 알린다(설치·PATH 변경은 안내만)."""
+        self.ok("install", str(self.target), "--yes")
+        tool = self.load_tool()
+        from unittest import mock
+        with mock.patch.object(tool.shutil, "which", lambda name: None):
+            warns = tool.tool_warnings()
+        self.assertTrue(any("git" in w for w in warns))
+        self.assertTrue(any("uv" in w and "PATH" in w for w in warns))
+
     def test_refuses_template_itself(self):
         self.assertNotEqual(self.run_tool("install", str(self.TEMPLATE)).returncode, 0)
         self.assertNotEqual(self.run_tool("update", str(self.target)).returncode, 0)  # 설치 전
