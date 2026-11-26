@@ -60,7 +60,7 @@
 | 파일 | 정책 |
 |---|---|
 | `verify.py` | 모든 템플릿과 같은 파일(테스트가 검사) |
-| `sched.py` | `autonomous-parallel-dev`의 상위 집합. 기존 명령·출력은 유지하고 확장만 한다. 기존 autonomous 테스트를 이 템플릿에 다시 돌린다(새 관문인 검증자 배정·설계 검토만 끄고) |
+| `sched.py` | `autonomous-parallel-dev`의 상위 집합. 기존 명령·출력은 유지하고 확장만 한다. 기존 autonomous 테스트를 이 템플릿에 다시 돌린다(새 관문인 검증자 배정·설계 검토만 끄고). 2026-11-26 내부를 `sched_store`(저장·잠금·git)·`sched_rules`(상태 규칙)·`sched_view`(지표·스냅샷)로 나눴다. 이름은 `sched`에서 그대로 보이고(integrate.py·테스트 무변경), 함수 본문은 옮기기만 했다 |
 | `integrate.py` | 두 곳만 다르다: 결정 대기 거부(`hold merge` 포함), 통합 기록 뒤 스냅샷 갱신(`asterbraid 추가` 주석) |
 | 엔진 버그 수정 | 두 autonomous 템플릿에 함께 적용하고 각자의 테스트로 확인한다 |
 

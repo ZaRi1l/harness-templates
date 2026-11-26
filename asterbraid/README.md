@@ -67,7 +67,8 @@ CLAUDE.md                                   프로젝트 규칙 (TODO 채우기,
 .claude/asterbraid.md                       하네스 규칙 (update가 바꾼다)
 .claude/asterbraid.lock.json                설치한 파일 해시 (설치 때 생긴다)
 .claude/settings.json                       권한, Hook, Mod 켜기(enabledPlugins)
-.claude/hooks/sched.py                      스케줄러 (+ 스냅샷·결정·일시 중지·우선순위·경고)
+.claude/hooks/sched.py                      스케줄러 명령 (+ 결정·일시 중지·우선순위·자리 비움·설계 검토)
+.claude/hooks/sched_store.py, sched_rules.py, sched_view.py   저장·잠금·git / 상태 규칙 / 지표·스냅샷 (sched.py가 불러 쓴다)
 .claude/hooks/integrate.py                  통합 엔진 (+ 결정 대기 거부, 통합 뒤 스냅샷)
 .claude/hooks/verify.py                     테스트 검증 (모든 템플릿과 같은 파일)
 .claude/hooks/auto.config.json, verify.config.json
