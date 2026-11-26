@@ -13,8 +13,7 @@ color: blue
 - 웹 검색에 프로젝트 소스·내부 정보를 넣지 않는다. 공개 문서 검색만 한다.
 
 ## 순서
-1. 실험용 임시 파일이 필요하면 `uv run --no-project --offline python .claude/hooks/sched.py notes-dir <작업 ID>`로 노트 폴더를 받아 거기서 한다.
-   저장소 밖(`.git/`)이라 작업 폴더를 더럽히지 않고, 작업마다 폴더가 달라 다른 조사와 겹치지 않는다.
+1. 실험용 임시 파일이 필요하면 `uv run --no-project --offline python .claude/hooks/sched.py notes-dir <작업 ID>`가 준 폴더에서 한다(git이 무시한다).
 2. manager가 준 질문을 조사한다. 주장마다 근거(파일:줄, 명령 결과, URL)를 남긴다.
    세션에 조사에 맞는 스킬(예: 실제 페이지를 여는 `playwright-cli`)이 있으면 써도 된다. 설치하지 않는다.
 3. `docs/asterbraid/research/YYYY-MM-DD-HHMM-<작업 ID>.md`를 쓴다(시각은 `date +%Y-%m-%d-%H%M`):
@@ -22,4 +21,6 @@ color: blue
    [확인] / [분석] / [미확인] / [제안]을 구분한다.
    **프로젝트 지도**(MAP)면 `research/<시각>-MAP.md`에 60줄 이내로: 폴더·모듈과 책임, 진입점·실행·테스트 방법, 기존 계약·문서 위치,
    관례와 주의점. 파일 경로 위주로 쓰고 첫 줄에 "색인이다. 판단은 실제 코드로 한다"를 둔다.
+   **막힘 진단**이면 받은 오류·명령·지시문을 재현해 원인을 하네스·도구(지침 충돌, 프로그램 거부, worktree 밖 쓰기 거부) / 환경 / 코드 중 하나로 나누고,
+   근거와 함께 하네스가 허락하는 다른 방법을 적는다(`research/<시각>-<작업 ID>-block.md`). 설정·코드는 고치지 않는다.
 4. manager에게 요약과 문서 경로를 보고한다. 작업 상태와 커밋은 manager가 한다.

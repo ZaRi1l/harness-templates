@@ -8,16 +8,21 @@
 
   init                         통합 브랜치(메인 체크아웃의 현재 브랜치)를 기록한다
   add / load FILE              작업 추가(하나 / JSON 목록 일괄). 의존성 순환·중복 ID를 거부한다
-  next --pool P                지금 시작할 수 있는 작업(research|design|implement|verify|merge)
+  next --pool P                지금 시작할 수 있는 작업(research|design|review|preview|approval|implement|verify|merge).
+                               attention(재작업·열린 결정)과 map(프로젝트 지도 경로)도 함께 돌려준다
   start ID --pool P --agent A  작업을 배정한다(중복 배정·경로 충돌·슬롯 초과·미완료 의존·결정 대기·일시 중지를 거부한다).
-                               에이전트 지시문 첫 줄에 넣을 marker와 attempt 번호를 돌려준다
+                               에이전트 지시문 첫 줄에 넣을 marker와 attempt 번호를 돌려준다. 메인 체크아웃에서만 한다
+  start ID --pool verify --agent V [--replace OLD]   제출된 커밋에 verifier 배정(필요한 수까지). 이 이름의 증거만 센다
   done ID [--notes PATH] [--close]   조사·설계 단계 완료(--close: 구현 없이 작업 완료, 노트 파일 필요)
+  design-review ID --verifier V --verdict PASS|FAIL [--notes] / --skip --decision D   deep 설계 검토(FAIL → 다시 설계)
+  review-mode off|deep|ask     설계 검토 설정(deep: deep 설계는 검토 PASS 뒤 구현, ask: 사용자에게 묻고 --skip 가능)
   deps ID --set A,B            구현 시작 전에 의존을 바꾼다(순환 검사, 승인·노트는 그대로)
   preview ID --file F          (designer) 미리보기 버전 등록 → AWAITING_APPROVAL
   approve ID [--version N --sha S] / revise ID [--version N] --feedback "..."
                                사용자의 승인 / 수정 요청을 기록한다(버전·해시가 사용자가 본 것과 같아야 한다)
   dashboard                    미리보기와 전체 작업 현황을 한 HTML로 만든다
   decide add|answer|cancel     사용자 의사결정 기록. 열린 결정에 묶인 작업만 시작·통합을 멈춘다
+                               add [--hold merge]: 통합만 막는다 / [--ask-user]: 자리 비움 중에도 adopt 안 함
   decide adopt ID              (자리 비움 중) 위임된 종류의 결정을 추천안으로 정한다(by away)
   away [--previews] / back     사용자 자리 비움 켜기(--previews: 미리보기 최신 버전 approve --by away 허용) / 복귀
   away-review KEY --keep|--redo   자리 비운 동안 정한 것 확인: 그대로 둠 / 같은 선택지로 결정을 다시 연다
@@ -31,7 +36,7 @@
   status [--json] / metrics    현황 / 소요 시간·실패율 등
   recover [--reset-running]    저장된 상태를 실제 Git 상태와 대조해 고친다(세션 재시작 때)
   cleanup [ID...] [--dry-run]  통합이 끝난 작업의 worktree·브랜치를 조건을 확인하고 지운다(--dry-run: 목록만)
-  limit POOL N / notes-dir ID  슬롯 수 조절 / 작업별 조사·설계 노트 폴더
+  limit POOL N / notes-dir ID  슬롯 수 조절 / 작업별 임시 폴더(부른 체크아웃 안 .asterbraid-tmp/ID, git이 무시)
 
 종료 코드: 0 성공, 2 거부(사유를 stderr에 쓴다).
 """
@@ -1547,10 +1552,10 @@ def main() -> int:
     cmd("metrics", cmd_metrics)
     cmd("limit", cmd_limit, (("pool",), {}), (("n",), {"type": int}))
     cmd("notes-dir", cmd_notes_dir, ID)
-    a = ap.parse_args()
-    for stream in (sys.stdout, sys.stderr):
+    for stream in (sys.stdout, sys.stderr):  # -h·인자 오류도 UTF-8로(Windows 콘솔 인코딩이면 한글이 깨진다)
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
+    a = ap.parse_args()
     try:
         out = a.fn(a, main_root(), config())
     except Refused as e:

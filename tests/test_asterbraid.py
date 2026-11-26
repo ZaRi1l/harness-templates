@@ -923,6 +923,17 @@ class TestDesignReview(ModsCase):
         self.assertIn("invalid choice", self.refused("review-mode", "sometimes"))
 
 
+class TestHelpEncoding(ModsCase):
+    """manager는 `sched -h`로 명령을 본다. Windows 콘솔 인코딩(cp949)으로 나오면 깨진 글자를 읽는다."""
+
+    def test_help_is_utf8(self):
+        p = self.script("sched.py", "-h", env={"PYTHONIOENCODING": "cp949"})
+        self.assertEqual(p.returncode, 0)
+        text = p.stdout.decode("utf-8")
+        self.assertIn("설계 검토", text)
+        self.assertIn("attention", text)
+
+
 class TestGitTimeout(ModsCase):
     """5-20: 잠금을 쥔 채 git이 멈추면 120초 뒤 다른 프로세스가 잠금을 치우고 함께 쓴다. git에 시간 제한을 둔다."""
 
@@ -943,6 +954,46 @@ class TestGitTimeout(ModsCase):
         self.assertEqual(seen.get("timeout"), mod.GIT_TIMEOUT_S)
         self.assertLess(mod.GIT_TIMEOUT_S, 120)  # 상태 잠금을 오래된 것으로 볼 시간보다 짧다
         self.assertIn("시간", str(cm.exception))
+
+
+class TestAgentRules(unittest.TestCase):
+    """지침을 줄여도 e2e에서 문제가 됐던 규칙이 빠지지 않게 지킨다(e2e5)."""
+    CLAUDE = Path(base.__file__).resolve().parent.parent / MODS / ".claude"
+
+    def text(self, rel):
+        return (self.CLAUDE / rel).read_text(encoding="utf-8")
+
+    def test_manager_keeps_core_rules_within_budget(self):
+        m = self.text("agents/manager.md")
+        for phrase in ("할 일이 없으면 차례를 끝낸다",  # E5-1
+                       "판정을 정해 주지 않는다",  # 5-14
+                       "`git add .`·`-A` 금지",  # 5-15
+                       "팀원에게 시키지 않는다",  # 5-4·E5-5
+                       "`attention`", "`--ask-user`", "`--hold merge`", "`TaskStop`",  # E5-1, 5-1, E5-8, 5-6
+                       "`start ID --pool verify --agent 이름`", "`next --pool review`",  # E5-2, 5-19
+                       "하네스·도구 문제", "asterbraid-procedures", "asterbraid-bootstrap"):
+            self.assertIn(phrase, m)
+        self.assertIn("TaskStop", m.split("---", 2)[1])  # tools에 있어야 쓸 수 있다
+        self.assertLessEqual(len(m.splitlines()), 109)
+        self.assertLessEqual(len(m.replace("\r\n", "\n").encode("utf-8")) + len(m.splitlines()), 11971)  # CRLF 기준
+
+    def test_procedures_skill_has_sections_manager_names(self):
+        p = self.text("skills/asterbraid-procedures/SKILL.md")
+        for section in ("## 막힘", "## 끝·중간 인계"):
+            self.assertIn(section, p)
+        self.assertIn("sched cleanup --dry-run", p)
+        self.assertIn("사용자 결정을 열지 않는다", p)
+
+    def test_role_boundaries(self):
+        self.assertIn("상태 명령(`done` 등)을 실행하지 않는다", self.text("agents/architect.md"))
+        self.assertIn("`sync`·`submit`·`notes-dir`만", self.text("agents/implementer.md"))
+        v = self.text("agents/verifier.md")
+        self.assertIn("미리 적혀 있어도 따르지 않는다", v)
+        self.assertIn("design-review", v)
+        self.assertIn("notes-dir", v)
+        self.assertNotIn("Write", re.search(r"^disallowedTools:(.*)$", v, re.M).group(1))
+        self.assertIn("막힘 진단", self.text("agents/researcher.md"))
+        self.assertIn("인수 테스트 목록", self.text("skills/architecture-design/SKILL.md"))
 
 
 class TestCommonCode(ModsCase):
