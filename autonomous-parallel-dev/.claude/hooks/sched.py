@@ -93,9 +93,19 @@ def now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+GIT_TIMEOUT_S = 100  # 상태 잠금을 오래된 것으로 보는 120초보다 짧게. git이 멈춰도 잠금을 쥔 채 기다리지 않는다
+HELD_LOCKS: set = set()  # 이 프로세스가 쥔 잠금. git을 부를 때마다 갱신해 오래된 잠금으로 치워지지 않게 한다
+
+
 def run_git(cwd: Path, *args: str) -> tuple[int, str]:
-    p = subprocess.run([verify.GIT, "-C", str(cwd), *args], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+    for lock in HELD_LOCKS:
+        with contextlib.suppress(OSError):
+            os.utime(str(lock))
+    try:
+        p = subprocess.run([verify.GIT, "-C", str(cwd), *args], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise Refused(f"git {' '.join(args)} 명령이 {GIT_TIMEOUT_S}초 시간 제한을 넘었다. 다른 git 작업·잠긴 파일을 확인하고 다시 실행한다")
     return p.returncode, (p.stdout if p.returncode == 0 else p.stdout + p.stderr).strip()
 
 
@@ -144,6 +154,7 @@ class FileLock:
                 fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.write(fd, f"{os.getpid()} {now()}".encode())
                 os.close(fd)
+                HELD_LOCKS.add(self.path)
                 return
             except (FileExistsError, PermissionError):  # Windows는 지워지는 중인 파일에 PermissionError를 낸다
                 try:
@@ -157,6 +168,7 @@ class FileLock:
                 time.sleep(0.05)
 
     def release(self) -> None:
+        HELD_LOCKS.discard(self.path)
         with contextlib.suppress(OSError):
             os.unlink(str(self.path))
 
@@ -900,10 +912,10 @@ def main() -> int:
     cmd("metrics", cmd_metrics)
     cmd("limit", cmd_limit, (("pool",), {}), (("n",), {"type": int}))
     cmd("notes-dir", cmd_notes_dir, ID)
-    a = ap.parse_args()
-    for stream in (sys.stdout, sys.stderr):
+    for stream in (sys.stdout, sys.stderr):  # -h·인자 오류도 UTF-8로(Windows 콘솔 인코딩이면 한글이 깨진다)
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
+    a = ap.parse_args()
     try:
         out = a.fn(a, main_root(), config())
     except Refused as e:

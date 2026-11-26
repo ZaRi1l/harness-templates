@@ -9,7 +9,7 @@
   init                         통합 브랜치(메인 체크아웃의 현재 브랜치)를 기록한다
   add / load FILE              작업 추가(하나 / JSON 목록 일괄). 의존성 순환·중복 ID를 거부한다
   next --pool P                지금 시작할 수 있는 작업(research|design|review|preview|approval|implement|verify|merge).
-                               attention(재작업·열린 결정)과 map(프로젝트 지도 경로)도 함께 돌려준다
+                               attention(재작업·열린 결정), map·conventions(프로젝트 지도·코드 관례 경로)도 함께 돌려준다
   start ID --pool P --agent A  작업을 배정한다(중복 배정·경로 충돌·슬롯 초과·미완료 의존·결정 대기·일시 중지를 거부한다).
                                에이전트 지시문 첫 줄에 넣을 marker와 attempt 번호를 돌려준다. 메인 체크아웃에서만 한다
   start ID --pool verify --agent V [--replace OLD]   제출된 커밋에 verifier 배정(필요한 수까지). 이 이름의 증거만 센다
@@ -107,7 +107,7 @@ ADOPTABLE_KINDS = ("ui", "ux", "direction", "architecture", "requirements")
 REVIEW_MODES = ("off", "deep", "ask")
 HOLDS = ("start", "merge")  # 결정이 막는 단계: start(시작·통합 모두) / merge(통합만, 구현·테스트는 진행)
 TMP_DIR = ".asterbraid-tmp"  # notes-dir: 체크아웃마다 두는 임시 폴더(git이 무시)
-GIT_TIMEOUT_S = 60  # 상태 잠금을 오래된 것으로 보는 120초보다 짧게. git이 멈춰도 잠금을 쥔 채 기다리지 않는다
+GIT_TIMEOUT_S = 100  # 상태 잠금을 오래된 것으로 보는 120초보다 짧게. git이 멈춰도 잠금을 쥔 채 기다리지 않는다
 NOTE_KINDS = ("strategy", "priority", "decision", "tech", "alternative", "split", "risk", "resolved", "milestone",
               "blocker", "plan")
 SNAPSHOT_SCHEMA = 1
@@ -137,7 +137,7 @@ def run_git(cwd: Path, *args: str) -> tuple[int, str]:
         p = subprocess.run([verify.GIT, "-C", str(cwd), *args], capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        raise Refused(f"git {' '.join(args)}이(가) {GIT_TIMEOUT_S}초 시간 제한을 넘었다. 다른 git 작업·잠긴 파일을 확인하고 다시 실행한다")
+        raise Refused(f"git {' '.join(args)} 명령이 {GIT_TIMEOUT_S}초 시간 제한을 넘었다. 다른 git 작업·잠긴 파일을 확인하고 다시 실행한다")
     return p.returncode, (p.stdout if p.returncode == 0 else p.stdout + p.stderr).strip()
 
 
@@ -586,9 +586,9 @@ def attention(st: dict) -> list:
     return out
 
 
-def project_map(root: Path) -> str | None:
-    """asterbraid 추가(E5-9): 최신 프로젝트 지도 경로. 지시문에 넣는다."""
-    maps = sorted((root / "docs" / "asterbraid" / "research").glob("*MAP*.md"))
+def project_map(root: Path, kind: str = "MAP") -> str | None:
+    """asterbraid 추가(E5-9): 최신 프로젝트 지도(MAP)·코드 관례(CONVENTIONS) 경로. 지시문에 넣는다."""
+    maps = sorted((root / "docs" / "asterbraid" / "research").glob(f"*-{kind}.md"))
     return maps[-1].relative_to(root).as_posix() if maps else None
 
 
@@ -596,7 +596,8 @@ def cmd_next(a, root, cfg):
     with store(root, write=False) as st:
         picks, waiting = dispatchable(st, cfg, a.pool)
         out = {"pool": a.pool, "dispatch": [{**brief(t), "design_depth": t.get("design_depth")} for t in picks],
-               "waiting": waiting, "attention": attention(st), "map": project_map(root)}
+               "waiting": waiting, "attention": attention(st), "map": project_map(root),
+               "conventions": project_map(root, "CONVENTIONS")}
         if a.pool in SLOT_STATE:
             out["free_slots"] = limit(st, cfg, a.pool) - used(st, a.pool)
         if a.pool == "verify":
