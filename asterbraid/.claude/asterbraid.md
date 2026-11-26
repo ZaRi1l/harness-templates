@@ -15,11 +15,11 @@
 
 ## 실행 습관 (모든 에이전트)
 - 서버는 검사 스크립트(아래 노트 폴더의 파일) 안에서 띄우고 같은 스크립트의 끝(`finally`)에서 끈다. 따로 띄워야 하면 시간 제한(예: `timeout 900 …`)을 걸어
-  저절로 끝나게 한다. 나중에 PID를 찾아 `kill`·`taskkill`하지 않는다(권한 분류기가 막는다). 앱 기본 포트(예: 8000)를 피해 빈 포트를 쓰고,
+  저절로 끝나게 한다. 나중에 PID를 찾아 `kill`·`taskkill`하지 않는다(권한 분류기가 막는다). 기본 포트(예: 8000)를 피해 빈 포트를 쓰고,
   남이 띄운 서버는 쓰지 않는다. 보고에 "남긴 프로세스 없음"을 적는다.
-- 여러 줄 스크립트는 `python -c`·heredoc 대신 `sched notes-dir ID`가 준 폴더(지금 체크아웃 안 `.asterbraid-tmp/`, git이 무시)에 파일로 써서 실행한다.
+- 여러 줄 스크립트는 `python -c`·heredoc 대신 `sched notes-dir ID`가 준 폴더(체크아웃 안 `.asterbraid-tmp/`, git이 무시)에 파일로 써서 실행한다.
 - 프로그램·도구 경계 때문에 막히면(지침끼리 충돌, worktree 밖 쓰기 거부 등) 하네스 문제로 보고한다. 다른 경로로 우회하지 않는다.
-- `playwright-cli`가 PATH에 없으면 `npx --no-install playwright-cli`·`%APPDATA%\npm\`을 확인한다(설치하지 않는다). 끝나면 자기가 만든 `.playwright-cli/`를 지운다(막히면 둔다. `.gitignore`돼 있다).
+- `playwright-cli`가 PATH에 없으면 `npx --no-install playwright-cli`·`%APPDATA%\npm\`을 확인한다(설치하지 않는다). 끝나면 자기가 만든 `.playwright-cli/`를 지운다.
 
 ## 에이전트
 | 에이전트 | 모델 | 역할 |
@@ -46,7 +46,7 @@
 - 파일 이름은 `YYYY-MM-DD-HHMM-<작업 ID 또는 주제>.md`(시각은 `date +%Y-%m-%d-%H%M`). 첫머리에 작성 시각, 작성자, 출처, 관련 작업·결정 ID.
 - 서브에이전트는 쓰기만 하고, manager가 바로 integration에 `docs(asterbraid): …`로 커밋한다(implementer는 `sched sync`로 받는다).
 - 새 문서가 옛 문서를 대신하면 지우지 말고 옛 문서 첫머리에 `대체됨: <새 파일 이름>` 한 줄을 넣는다. 그 표시가 있는 문서는 읽지 말고 새 문서를 본다.
-- 프로젝트 지도(`research/…-MAP.md`)가 있으면 먼저 읽고 필요한 파일만 연다. 코드 관례(`…-CONVENTIONS.md`)는 코드를 쓰거나 검사하는 쪽이 읽는다. 문서와 코드가 다르면 코드를 따른다.
+- 프로젝트 지도(`research/…-MAP.md`)가 있으면 먼저 읽고 필요한 파일만 연다. 코드 관례(`…-CONVENTIONS.md`)는 코드를 쓰거나 검사하는 쪽이 읽는다. 문서와 코드가 다르면 코드를 따른다(`[사용자 지정]` 관례가 새 코드에 우선).
 - 작업에 관련된 문서는 모든 에이전트가 참고한다. 미리보기 HTML(`.git/claude-auto/previews/`, 해시로 승인)과 상태·결정·검증 증거(`sched`)는 지금 자리 그대로다.
 
 ## 프로그램이 강제하는 것 (사용자 승인 없이 수정하지 않는다)

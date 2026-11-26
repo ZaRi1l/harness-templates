@@ -6,6 +6,13 @@
 사용자는 **manager 한 명과 대화**하고, 나머지 에이전트의 활동과 전체 진행은 Claude Code 안의 Pane에서 본다.
 구현 전 결과물은 지금처럼 브라우저의 미리보기 HTML로 검토·승인한다. 판단은 에이전트가 하고, **상태·배정·병합·승인 기록은 프로그램이 강제한다.**
 
+## 빠른 시작
+1. 설치: `uv run --no-project python <템플릿>/asterbraid/asterbraid.py install <프로젝트 폴더>` (바꿀 내용을 보이고 묻는다. 아래 [사용법](#사용법))
+2. 프로젝트 폴더(저장소 루트)에서 `claude --agent manager`. 처음이면 manager가 시작 준비 내용을 보여 주고 확인받는다.
+3. 요구를 문서(예: `docs/design.md`)나 대화로 준다. "requirements로 정리해서 보여 주고 확인받은 다음 진행해줘"라고 하면 된다.
+4. 진행은 관제 Pane(`/asterbraid`)에서 본다. 미리보기 승인·결정은 4번 탭의 버튼이나 manager와의 대화로 답한다. 밤새 맡기려면 7번 탭 [자리 비움].
+5. 끝나면 manager가 `docs/asterbraid/reports/`에 끝 보고를 쓴다. `integration` 브랜치를 확인하고 `main`에는 사용자가 직접 반영한다.
+
 ## 흐름
 ```mermaid
 flowchart TD
@@ -19,6 +26,8 @@ flowchart TD
     S -->|"dashboard.json<br/>(읽기 전용 스냅샷)"| P
     S -->|"dashboard"| H
     S -.-> R["researcher<br/>조사 · 막힘 진단"] & A["architect"] & D["designer"]
+    R & A -->|"결과 문서(요청된 산출물)<br/>보고만 오면 manager가 옮겨 쓴다"| DOC[("docs/asterbraid/<br/>조사 · 설계 · 지도 · 관례")]
+    DOC -->|"조사·설계만이면 done --close"| M
     A -->|"design.md 계약<br/>인수 테스트 목록"| DR{"설계 검토 (deep)<br/>verifier · 끔/묻기 가능"}
     DR -->|"FAIL → 다시 설계"| A
     DR -->|"PASS"| IM
@@ -52,8 +61,8 @@ flowchart TD
 | 이상 감지 | 없음 | 긴 단계(스케줄러), 멈춤·연속 실패·유령 슬롯(Mod). 경고만 하고 판단은 manager |
 | 처음 설정 | 사람이 TODO·테스트 설정·`.gitignore`·통합 브랜치를 준비 | 템플릿 + 설계 문서만 넣으면 manager가 준비하고 확인받는다 |
 | 설계 | deep 프로파일(위험도 high)에서만 architect | `--needs-design [light\|standard\|deep]`로 위험도와 따로 정한다. architect는 `architecture-design` 스킬의 깊이별 형식으로 계약(인터페이스·데이터·오류)과 작업 분할을 쓴다 |
-| 조사·설계만 하는 작업 | 없음 | `sched done ID --close --notes …`로 구현 없이 완료 |
-| 정리 | `sched cleanup` | + `--dry-run`으로 지울 worktree·브랜치 목록을 먼저 보인다 |
+| 조사·설계만 하는 작업 | 없음 | `start`가 산출물 경로(`output`)를 정해 주고, `sched done ID --close --notes …`로 구현 없이 완료 |
+| 정리 | `sched cleanup` | + `--dry-run`으로 지울 worktree·브랜치 목록을 먼저 보인다. 재작업 전 옛 worktree와 본 체크아웃의 `.asterbraid-tmp/<ID>`도 지운다 |
 | 의존 바꾸기 | 없음(취소·재등록) | `sched deps ID --set A,B`(구현 시작 전, 순환 검사). 승인된 미리보기가 있는 작업은 `cancel --force` 없이 취소되지 않는다 |
 | 기존 프로젝트 | 직접 준비 | `asterbraid.py install`이 기존 파일을 살려 합치고, 시작 준비가 기준선 테스트를 먼저 확인한다 |
 | 필요한 것 | Claude Code | Claude Code 2.1.331에서 검증(Mods API는 early access) |
@@ -112,6 +121,29 @@ uv run --no-project python <템플릿 위치>/asterbraid/asterbraid.py install .
 - 필요한 것: git, [uv](https://docs.astral.sh/uv/)(Hook·sched가 `uv run --offline`으로 돈다. 처음이면 `uv python install 3.12`). `check`가 없으면 알린다. PATH는 `settings.json`에 넣지 않는다.
 - 프로젝트에서 Claude에게 "asterbraid로 설치해줘"라고 해도 된다(설정을 바꾸는 단계라 승인 창이 뜰 수 있다).
 
+### 업데이트
+1. 템플릿을 새로 받는다(`git pull`).
+2. **manager가 일하는 도중에는 하지 않는다.** 명령 탭 [새 배정 일시 중지](`sched pause`)를 누르고, 실행 중인 에이전트가 끝날 때까지 기다린다(관제 머리말 `실행 0`).
+   도중에 바꾸면 이미 떠 있는 에이전트는 옛 지침으로, Hook은 새 코드로 돌아 서로 어긋날 수 있다.
+3. `asterbraid.py update <프로젝트 폴더>` → 바꿀 목록을 보고 `y`.
+4. 바뀐 하네스 파일을 통합 브랜치에 커밋한다(`git add .claude CLAUDE.md .gitignore` → `git commit -m "chore: asterbraid update"`, update가 안내한다).
+   진행 중 작업의 worktree는 `sched sync`로 받기 전까지 옛 하네스를 쓴다. 옛 sched는 새 sched가 쓴 상태를 고치지 않고 거부한다(다음 업데이트부터).
+5. manager 세션을 닫고 새로 연다(`claude --agent manager`). 에이전트 지침과 Mod는 세션을 시작할 때 읽힌다. 그 뒤 [배정 재개](`sched resume`).
+   기존 프로젝트에 코드 관례 문서가 아직 없으면 `next`의 `attention`이 알리고, manager가 researcher 작업 하나로 만든다.
+
+| update가 바꾸는 것 | 두는 것 |
+|---|---|
+| 직접 고치지 않은 하네스 파일: `.claude/agents/`, `.claude/hooks/*.py`, `.claude/skills/`(Mod 포함), `.claude/previewUI/`, `.claude/asterbraid.md` | 직접 고친 하네스 파일(덮지 않고 알린다), `CLAUDE.md`(import 한 줄만 확인), `verify.config.json`·`auto.config.json` |
+| `settings.json`에 하네스 권한·Hook·Mod 항목 더하기(기존 값은 둔다) | `settings.local.json` 등 개인 설정, `.gitignore`의 기존 줄 |
+| `.gitignore`에 빠진 줄 더하기 | `docs/asterbraid/`(AI 문서), `.git/claude-auto/`(작업 상태·결정·미리보기), 작업 브랜치·worktree |
+
+### 문제가 생겼을 때
+- `asterbraid.py check <프로젝트 폴더>`: 빠진 파일, 고친 하네스 파일, git·uv·`uv run --offline python`이 도는지 점검한다.
+- `asterbraid.py rollback <프로젝트 폴더>`: 직전 install·update 전으로 되돌린다. 원본은 `.claude/asterbraid.backup/<시각>/`에 최근 3개가 있다(`.gitignore`됨).
+  update가 중간에 실패하면 자동으로 되돌린다. 작업 상태(`.git/claude-auto/`)와 AI 문서는 백업·되돌리기 대상이 아니다(update가 건드리지 않는다).
+- 관제 Pane이 안 보이면: 저장소 루트에서 열었는지, 작업 폴더 신뢰를 승인했는지, `/plugin` Installed 탭에 `asterbraid-dashboard@skills-dir`가 켜져 있는지 본다. `/asterbraid open`.
+- 머리말에 `■ 멈춤`이 보이면 그 줄의 이유(답할 결정·승인, 모두 보류, manager가 배정하지 않음)대로 한다. 보류 작업은 2번 탭에서 펼쳐 사유와 설계 문서를 본다.
+
 손으로 넣어도 된다(설치 프로그램을 쓸 수 없을 때):
 1. 템플릿의 `.claude/`와 `CLAUDE.md`를 프로젝트 루트에 복사한다. 같은 이름의 파일이 이미 있으면 덮지 말고 합친다:
    `.claude/settings.json`은 템플릿의 `permissions`·`hooks`·`enabledPlugins`·`worktree`·`env` 항목을 더하고,
@@ -153,6 +185,7 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
   숫자가 그대로여도 표시가 돌면 자동 갱신은 살아 있고, 스케줄러 상태가 바뀌지 않은 것이다. "변화"는 스냅샷이 마지막으로 바뀐 때다.
 - 레이아웃: 프롬프트 위 inline이면 **mini**(두 줄 요약), 도킹 폭 100칸 이상이면 **wide**(표 옆에 에이전트 열), 아니면 **compact**. 한글은 2칸으로 재서 자른다.
 - 상태는 색과 함께 기호(✓ ● ◎ ? ✗ ↻ ⇢ ⏸ ⚠)와 글자로 보인다. 완료율은 작업 수 기준이며 공수 진행률이 아니다.
+- 모든 탭이 같은 글자 규칙을 쓴다: 소제목은 `── 제목 ───` 구분선, 본문, 흐린 설명의 세 단계. 표의 작업 ID는 자르지 않고 제목을 줄인다.
 - "실행"은 이 세션에서 본 실제 서브에이전트, "배정"은 sched.py의 슬롯 점유다. 둘이 다르면 "실행 미확인"으로 표시한다.
 - 스냅샷을 못 읽으면 이전 화면을 두고 "갱신 실패"와 사유를 보인다. 읽기 실패를 작업 실패·완료로 바꾸지 않는다.
 - 아무것도 돌지 않고 시작할 것도 없이 2분 넘게 그대로면 머리말에 `■ 멈춤 13h38m째 — 사용자 답 필요: 결정 D-2 · 승인 UI`처럼 이유를 보인다.
@@ -161,12 +194,12 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
 | 탭 | 내용 |
 |---|---|
 | 현황 | 진행 중 작업 표(상태·단계·담당 에이전트와 경과 또는 기다리는 이유, 완료는 개수만), manager 설명, 병목, 최근 변화 |
-| 작업 | 목록(진행 중·대기·보류 위, 완료·취소는 접힘. 펼치면 최근 20개와 걸린 시간·토큰. 작은 변경은 `작게`. 누르면 담당 경로·완료 기준) / 타임라인 |
+| 작업 | 목록(진행 중·대기·보류 위, 완료·취소는 접힘. 펼치면 최근 20개와 걸린 시간·토큰. 작은 변경은 `작게`. 누르면 담당 경로·완료 기준·설계 깊이·설계 검토 결과(PASS/FAIL·검토자·지적), [설계·조사 문서 보기]로 `docs/asterbraid/`의 노트를 Pane 안에서 읽기) / 타임라인 |
 | 에이전트 | 작업별 트리. 실행 중 에이전트가 있는 작업 → 대기 팀원만 있는 작업 → 끝남(접힘), 작업 안은 실행 중 → 대기 → 끝남. 열: 역할, 단계·회차, 일한 시간, 도구 수, 토큰, 마지막 도구(좁으면 오른쪽부터 뺀다). 완료 작업에 팀원이 남은 이유(그 계약을 쓰는 작업), marker 없는 실행은 "미연결" |
 | 승인·결정 | 답할 것이 위: 열린 결정(선택지·장단점·추천·선택 버튼, "통합만 대기"·"직접 정함" 표시) → 검토 대기 미리보기(열기·승인·수정 요청 입력 → 한 번 더 확인) → 자리 비운 동안 자동으로 정한 것(최근 3건, [모두 보기]·[모두 이대로 둠]·[이대로 둠]·[다시 정하기]) |
 | 통합·지표 | 통합 브랜치 HEAD, 작업 브랜치와 검증 수, 통합 대기열, 최근 통합 결과, 스케줄러 지표와 Mod 관측(동시 실행, 토큰, 세션 비용 추정) |
 | 활동 | 상태 변화, 통합 결과, 결정, 에이전트 시작·끝, 도구 거부, 경고. 오류·경고만 보기 |
-| 명령 | 버튼으로: 새로고침, 브라우저 대시보드, 배치, Pane 닫기, 갱신 간격 −/+, 자리 비움·복귀, 설계 검토(끔·deep 설계만·deep마다 묻기), 새 배정 일시 중지·재개, 풀별 동시 실행 한도 −/+. 작업 우선순위 ▲/▼는 작업 탭에서 배정 전 작업을 펼쳐서. 아래에 같은 일을 하는 `/asterbraid` 명령 |
+| 명령 | 버튼으로: 새로고침, 브라우저 대시보드, 배치, Pane 닫기, 갱신 간격 −/+, 색(테마·밤하늘), 자리 비움·복귀, 설계 검토(끔·deep 설계만·deep마다 묻기), 새 배정 일시 중지·재개, 풀별 동시 실행 한도 −/+. 작업 우선순위 ▲/▼는 작업 탭에서 배정 전 작업을 펼쳐서. 아래에 같은 일을 하는 `/asterbraid` 명령 |
 
 ## 명령 (`/asterbraid`)
 모델을 부르지 않고 바로 실행된다(manager가 응답하는 중에도).
@@ -184,6 +217,7 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
 | `away [previews]` / `back` | 자리 비움 켜기(미리보기 자동 승인 포함) / 복귀 |
 | `rate 1\|2\|5\|10` | 화면 갱신 간격(초). 고른 값은 다음 세션에도 남는다 |
 | `review off\|deep\|ask` | 설계 검토 끔 / deep 설계만 / deep마다 manager가 묻기 |
+| `palette theme\|night` | 색: 터미널 테마(기본, 밝은 터미널에도 맞는다) / 밤하늘(짙은 남색 바탕) |
 
 브라우저는 Windows `explorer.exe`(PATH에 없으면 `C:\Windows\explorer.exe`), macOS `open`, Linux `xdg-open`으로 연다(셸 없이). 열 수 없으면 사유와 전체 파일 경로를 알려 준다.
 
@@ -272,7 +306,8 @@ Mod 설정은 Claude Code 설정 메뉴(또는 settings의 `pluginConfigs`)에�
 | `statusLine`, `notify` | true | 상태 줄, 토스트 |
 | `stallMinutes` | 10 | 이 시간 동안 도구 호출이 없으면 멈춤 경고 |
 | `tellManager` | false | 켜면 새 경고를 manager가 읽는 메모로 한 번 덧붙인다 |
-화면 선택(탭·필터·레이아웃)은 세션 상태라 리로드에도 남고 새 세션에서는 기본값이다.
+| `palette` | theme | theme: 터미널 테마 색 / night: 밤하늘(명령 탭·`/asterbraid palette`로도 바꾼다) |
+화면 선택(탭·필터·레이아웃·색)은 세션 상태라 리로드에도 남고 새 세션에서는 기본값이다.
 
 ## 보안
 - Mod는 관찰 Hook(`agent.spawn`, `agent.report`, `tool.call`)에서 `next(e)`의 결과를 그대로 돌려준다. 권한 판정·도구 입력·프롬프트를 바꾸지 않는다.
@@ -299,8 +334,8 @@ Mod 설정은 Claude Code 설정 메뉴(또는 settings의 `pluginConfigs`)에�
 - 타입: Mod 폴더를 한 번 로드하면 엔진이 `.claude-plugin/types/`를 쓰고, 그 뒤 `npx -p typescript tsc -p .claude/skills/asterbraid-dashboard`
 
 ## 한계
-- **실제 Claude Code 세션에서 끝까지 돌려 본 적이 없다.** 스케줄러는 실제 git 저장소 테스트, Mod는 엔진 테스트 도구(`claude plugin test`)와 타입 검사로만 확인했다.
-  Pane 배치, `/plugin`의 활성 표시, 자동 열기, 브라우저 열기, manager가 marker를 지침대로 넣는지는 미확인이다.
+- 실제 Claude Code 세션 시험(한 예제 프로젝트, 새 설치·기존 프로젝트 이식·업데이트·밤샘 자리 비움)을 여러 번 했고, 나온 문제는 테스트로 재현해 고쳤다.
+  여전히 예제 하나 기준이다. 스케줄러는 실제 git 저장소 테스트, Mod는 엔진 테스트 도구(`claude plugin test`)와 타입 검사로도 확인한다.
 - Mods API는 early access다. 이 Mod는 Claude Code 2.1.331 기준이며, 버전이 바뀌면 `claude plugin validate`부터 다시 본다.
 - 에이전트 ↔ 작업 연결은 manager가 지시문 첫 줄에 marker를 넣어야 된다(지침). 없으면 "미연결"로만 보인다.
 - 에이전트별 비용은 알 수 없다. 토큰은 Claude Code가 보고하는 값(최근 요청 입력 + 출력), 세션 비용은 추정이다.

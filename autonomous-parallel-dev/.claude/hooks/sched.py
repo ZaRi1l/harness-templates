@@ -780,33 +780,61 @@ def cmd_recover(a, root, cfg):
     return {"actions": actions}
 
 
+def checked_out(root: Path) -> dict:
+    """브랜치 → 그 브랜치를 체크아웃한 worktree 경로(e2e6 E6-3: 옛 브랜치가 옛 worktree에 남아 branch -d가 실패했다)."""
+    out, cur = {}, None
+    for line in git(root, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            cur = line[len("worktree "):]
+        elif line.startswith("branch refs/heads/"):
+            out[line[len("branch refs/heads/"):]] = cur
+    return out
+
+
+def same_path(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return Path(a).resolve() == Path(b).resolve()
+
+
 def cmd_cleanup(a, root, cfg):
     results = {}
     with store(root) as st:
         integ = st["integration_branch"]
         busy = {t["worktree"] for t in st["tasks"].values() if t["state"] not in ("COMPLETED", "CANCELLED")}
+        holders = checked_out(root)
         for t in st["tasks"].values():
             if (a.ids and t["id"] not in a.ids) or t["state"] != "COMPLETED" or t["cleaned"]:
                 continue
             wt, problems = t["worktree"], []
+            # 옛 브랜치를 아직 체크아웃한 옛 worktree(본 체크아웃·지금 worktree는 빼고)
+            old_wts = [holders[b] for b in t["old_branches"]
+                       if b in holders and not same_path(holders[b], str(root)) and not (wt and same_path(holders[b], wt))]
             if not is_ancestor(root, t["head"], integ):
                 problems.append("작업 커밋이 통합 브랜치에 없다")
             if t["branch"] in cfg["protected_branches"] or t["branch"] == integ:
                 problems.append("보호 대상 브랜치다")
-            if wt in busy:
+            if wt in busy or any(w in busy for w in old_wts):
                 problems.append("다른 진행 중 작업이 같은 worktree를 쓴다")
-            if wt and Path(wt).is_dir() and git(Path(wt), "status", "--porcelain"):
-                problems.append("worktree에 커밋 안 된 변경이나 추적 안 된 파일이 있다")
+            for w in [wt] + old_wts:
+                if w and Path(w).is_dir() and git(Path(w), "status", "--porcelain"):
+                    problems.append(f"worktree에 커밋 안 된 변경이나 추적 안 된 파일이 있다: {w}")
             if branch_head(root, t["branch"]) not in (None, t["head"]):
                 problems.append("브랜치에 통합되지 않은 새 커밋이 있다")
             if problems:
                 results[t["id"]] = {"cleaned": False, "why": problems}
                 continue
-            if wt and Path(wt).is_dir():
-                git(root, "worktree", "remove", wt)
-            for b in [t["branch"]] + t["old_branches"]:
-                if branch_head(root, b) and is_ancestor(root, b, integ):
-                    git(root, "branch", "-d", b)
+            try:  # 한 작업이 실패해도 나머지는 정리하고, 실패한 작업은 사유와 함께 cleaned=false로 남긴다(다음에 다시)
+                for w in [wt] + old_wts:
+                    if w and Path(w).is_dir():
+                        git(root, "worktree", "remove", w)
+                for b in [t["branch"]] + t["old_branches"]:
+                    if branch_head(root, b) and is_ancestor(root, b, integ):
+                        git(root, "branch", "-d", b)
+            except Refused as e:
+                results[t["id"]] = {"cleaned": False, "why": [str(e)]}
+                continue
             t["cleaned"] = True
             results[t["id"]] = {"cleaned": True}
     return results

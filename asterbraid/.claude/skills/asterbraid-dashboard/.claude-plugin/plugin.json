@@ -81,6 +81,13 @@
       "description": "켜면 새 경고를 manager가 읽는 메모로 한 번 덧붙인다. 끄면 화면·토스트에만 보인다",
       "type": "boolean",
       "default": false
+    },
+    "palette": {
+      "title": "Palette",
+      "description": "theme: 터미널 테마 색(밝은 터미널에도 맞는다). night: 짙은 남색 바탕의 밤하늘 색. 명령 탭에서도 바꾼다",
+      "type": "string",
+      "options": ["theme", "night"],
+      "default": "theme"
     }
   }
 }

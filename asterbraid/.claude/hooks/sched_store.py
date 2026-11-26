@@ -34,6 +34,8 @@ DEFAULT_CONFIG = {
     "verify_assignment": True,  # asterbraid 추가(e2e5): `start --pool verify`로 배정된 verifier의 증거만 센다
     "design_review": "deep",  # asterbraid 추가(5-19): off | deep(deep 설계는 검토 PASS 뒤 구현) | ask(deep마다 사용자에게 묻는다)
 }
+# e2e6 E6-7: 상태 파일을 쓴 sched의 엔진 버전. 상태 모양·규칙을 바꾸면 올린다. 더 새 엔진이 쓴 상태는 옛 sched가 고치지 않는다
+ENGINE = 2
 GIT_TIMEOUT_S = 100  # 상태 잠금을 오래된 것으로 보는 120초보다 짧게. git이 멈춰도 잠금을 쥔 채 기다리지 않는다
 
 

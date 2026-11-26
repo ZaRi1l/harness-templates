@@ -348,6 +348,9 @@ def main() -> int:
         print(f"[asterbraid] 거부: {e}", file=sys.stderr)
         return 2
     print("\n적용했다. 다음: Claude 세션을 다시 열고(새 Hook·에이전트·Mod를 읽는다) `claude --agent manager`로 시작한다")
+    if a.mode == "update" and acts:
+        print("업데이트한 하네스 파일을 통합 브랜치에 커밋한다(예: `git add .claude CLAUDE.md .gitignore` → `git commit -m \"chore: asterbraid update\"`).\n"
+              "진행 중 작업의 worktree는 `sched sync`로 받기 전까지 옛 하네스를 쓴다(새 sched가 쓴 상태는 옛 sched가 고치지 않고 거부한다)")
     return 0
 
 

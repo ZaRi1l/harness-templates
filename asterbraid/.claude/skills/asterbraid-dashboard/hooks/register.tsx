@@ -4,7 +4,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Activity, Run, SnapMeta, Snapshot, Tab, TaskTokens, Usage, View } from '../types'
+import type { Activity, DocView, Run, SnapMeta, Snapshot, Tab, TaskTokens, Usage, View } from '../types'
 import * as C from './core'
 
 const PANE = 'asterbraid'
@@ -17,10 +17,8 @@ const runsA = atom({ plugin: 'asterbraid-dashboard', key: 'runs' } as const, [] 
 const activityA = atom({ plugin: 'asterbraid-dashboard', key: 'activity' } as const, [] as Activity[], { shape: 'activity-1' })
 const viewA = atom({ plugin: 'asterbraid-dashboard', key: 'view' } as const, C.DEFAULT_VIEW, { shape: 'view-4' })
 const usageA = atom({ plugin: 'asterbraid-dashboard', key: 'usage' } as const, { costUsd: null, contextPct: null } as Usage, { shape: 'usage-1' })
-
-const TONE_COLOR: Record<C.Tone, string | undefined> = {
-  ok: 'success', warn: 'warning', err: 'error', accent: 'claude', info: 'suggestion', dim: undefined, plain: undefined,
-}
+const docA = atom({ plugin: 'asterbraid-dashboard', key: 'doc' } as const, null as DocView | null, { shape: 'doc-1' })
+const DOC_LINES = 60
 
 // 모듈 변수는 리로드 때 사라진다. 다시 계산할 수 있는 것만 둔다.
 let cfg: C.Config = C.parseConfig({})
@@ -305,8 +303,30 @@ async function refreshNow($: EngineInterface) {
   return r.ok ? '스냅샷을 다시 만들고 읽었다' : `스냅샷을 만들지 못했다: ${r.text}`
 }
 
+const paletteOf = (v: View) => v.palette ?? cfg.palette
+
 async function openPane($: EngineInterface) {
-  return $.ui.open({ id: PANE, title: TITLE, columns: cfg.paneColumns, rows: 12 })
+  const night = paletteOf(C.normalizeView(await read($, viewA))) === 'night'
+  return $.ui.open({ id: PANE, title: TITLE, columns: cfg.paneColumns, rows: 12, ...(night ? { backgroundColor: C.NIGHT_BG } : {}) })
+}
+
+/** 작업의 설계·조사 문서를 Pane 안에서 읽는다(docs/asterbraid/ 안의 .md만, 링크로 밖을 가리키면 열지 않는다). 상태는 바꾸지 않는다. */
+async function openDoc($: EngineInterface, task: string, rel: string) {
+  const root = (await read($, metaA)).root
+  const full = root ? C.docPath(root, rel) : null
+  const set = (d: DocView) => update($, docA, () => d)
+  if (!root || !full) return set({ task, path: rel, lines: [], error: `docs/asterbraid 밖이거나 .md가 아니라 열지 않는다: ${rel}` })
+  const [file, dir] = await Promise.all([
+    $.fs.stat(full, { resolve: true }).catch(() => null),
+    $.fs.stat(C.joinPath(root, 'docs/asterbraid'), { resolve: true }).catch(() => null),
+  ])
+  if (!file?.realPath || !dir?.realPath || !C.isInside(file.realPath, dir.realPath, caseless())) {
+    return set({ task, path: rel, lines: [], error: `문서를 찾지 못했거나 docs/asterbraid 밖을 가리킨다: ${rel}` })
+  }
+  const text = await $.fs.read(file.realPath).catch(() => null)
+  if (text === null) return set({ task, path: rel, lines: [], error: `읽지 못했다: ${rel}` })
+  const all = text.split("\n").map(line => C.stripControl(line.replace(/\r/g, '').replace(/\t/g, '  ')))
+  return set({ task, path: rel, lines: all.slice(0, DOC_LINES), more: Math.max(0, all.length - DOC_LINES), error: null })
 }
 
 function setView($: EngineInterface, fn: (v: View) => View) {
@@ -449,6 +469,10 @@ export const register: Register = (on, options) => {
         return say(await openPreview($, a.task, a.version))
       case 'rate':
         return say(await setRate($, a.seconds))
+      case 'palette':
+        await setView($, v => ({ ...v, palette: a.palette }))
+        await openPane($)
+        return say(`색: ${C.PALETTE_LABEL[a.palette]}`)
       default:
         return say(await act($, a))
     }
@@ -461,10 +485,16 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const Input = 'Input' in els ? els.Input : null
-    const [snap, meta, runs, activity, view0, usage, now] = await Promise.all([
-      read($, snapA), read($, metaA), read($, runsA), read($, activityA), read($, viewA), read($, usageA), $.clock.now(),
+    const [snap, meta, runs, activity, view0, usage, doc, now] = await Promise.all([
+      read($, snapA), read($, metaA), read($, runsA), read($, activityA), read($, viewA), read($, usageA), read($, docA), $.clock.now(),
     ])
     const view = C.normalizeView(view0)
+    // 6-1: 글자는 세 단계(제목 = section 구분선, 본문 = plain, 설명 = dim)만 쓴다. 색은 core의 표 한 곳에서 온다(4-15 밤하늘)
+    const pal = paletteOf(view)
+    const toneP = (t: C.Tone) => ({ color: C.toneColor(pal, t), dimColor: C.toneDim(pal, t) })
+    const dimP = toneP('dim')
+    const plainP = pal === 'night' ? { color: C.toneColor(pal, 'plain') } : {}
+    const bg = pal === 'night' ? { backgroundColor: C.NIGHT_BG } : {}
     const rate = (await $.store.get(RATE_KEY).catch(() => null)) as number | null
     const curRate = typeof rate === 'number' ? rate : cfg.refreshMs / 1000
     const tok = (snap ? ((await $.store.get(`tok:${snap.project.root}`).catch(() => null)) ?? {}) : {}) as TaskTokens
@@ -472,7 +502,7 @@ export const register: Register = (on, options) => {
     const layout = C.pickLayout(view.layout ?? cfg.layout, e.props.placement, W)
 
     const seg = (s: C.Seg) => (
-      <Text color={TONE_COLOR[s.tone ?? 'plain']} dimColor={s.tone === 'dim'} bold={s.bold}>
+      <Text {...toneP(s.tone ?? 'plain')} bold={s.bold}>
         {s.text}
       </Text>
     )
@@ -482,16 +512,16 @@ export const register: Register = (on, options) => {
 
     if (!snap) {
       return (
-        <Box flexDirection="column" width={W}>
-          <Text bold color="claude">✦ ASTERBRAID</Text>
-          <Text color={meta.error ? 'warning' : undefined} wrap="wrap">{meta.error ?? '스냅샷을 읽는 중'}</Text>
-          <Text dimColor wrap="wrap">manager가 `sched init` 뒤 작업을 등록하면 여기에 보인다. /asterbraid refresh</Text>
+        <Box flexDirection="column" width={W} {...bg}>
+          <Text bold {...toneP('accent')}>✦ ASTERBRAID</Text>
+          <Text {...toneP(meta.error ? 'warn' : 'plain')} wrap="wrap">{meta.error ?? '스냅샷을 읽는 중'}</Text>
+          <Text {...dimP} wrap="wrap">manager가 `sched init` 뒤 작업을 등록하면 여기에 보인다. /asterbraid refresh</Text>
         </Box>
       )
     }
 
     const warns = C.anomalies(snap, runs, now, cfg.stallMs)
-    if (layout === 'mini') return <Box flexDirection="column" width={W}>{lines(C.miniLines(snap, meta, runs, W, warns))}</Box>
+    if (layout === 'mini') return <Box flexDirection="column" width={W} {...bg}>{lines(C.miniLines(snap, meta, runs, W, warns))}</Box>
 
     const say = (text: string) => setView($, v => ({ ...v, lastAction: `ℹ ${C.fit(text, 400)}` }))
     const userWait = C.awaiting(snap).length + C.openDecisions(snap).length
@@ -502,7 +532,7 @@ export const register: Register = (on, options) => {
           const badge = t === 'decisions' && userWait ? ` ${userWait}` : ''
           return (
             <Button key={`tab-${t}`} plain hotkey={String(i + 1)} onPress={() => setView($, v => ({ ...v, tab: t as Tab }))}>
-              <Text bold={active} inverse={active} color={active ? 'claude' : badge ? 'warning' : undefined} dimColor={!active && !badge}>{` ${C.TAB_LABEL[t]}${badge} `}</Text>
+              <Text bold={active} inverse={active} {...toneP(active ? 'accent' : badge ? 'warn' : 'dim')}>{` ${C.TAB_LABEL[t]}${badge} `}</Text>
             </Button>
           )
         })}
@@ -524,14 +554,20 @@ export const register: Register = (on, options) => {
             <Button key="cmd-close" label="Pane 닫기" onPress={() => $.ui.close({ id: PANE })} />
           </Box>
           <Box columnGap={1}>
-            <Text>{`갱신 ${curRate}초`}</Text>
+            <Text {...plainP}>{`갱신 ${curRate}초`}</Text>
             <Button key="rate-down" label="−" plain onPress={() => setRate($, C.stepRate(curRate, -1)).then(say)} />
             <Button key="rate-up" label="+" plain onPress={() => setRate($, C.stepRate(curRate, 1)).then(say)} />
+          </Box>
+          <Box columnGap={1}>
+            <Text {...plainP}>색</Text>
+            {C.PALETTES.map(p => (pal === p
+              ? <Button key={`palette-${p}`} label={`● ${C.PALETTE_LABEL[p]}`} variant="primary" onPress={() => setView($, v => ({ ...v, palette: p })).then(() => openPane($))} />
+              : <Button key={`palette-${p}`} label={C.PALETTE_LABEL[p]} plain onPress={() => setView($, v => ({ ...v, palette: p })).then(() => openPane($))} />))}
           </Box>
           {line(C.section('사용자 차례', W))}
           <Box columnGap={1}>
             <Button key="cmd-decisions" label={`승인·결정 열기 (${userWait}건)`} variant={userWait ? 'primary' : undefined} onPress={() => setView($, v => ({ ...v, tab: 'decisions' }))} />
-            <Text dimColor>미리보기 승인·수정 요청과 결정은 그 탭의 버튼으로 한다</Text>
+            <Text {...dimP}>미리보기 승인·수정 요청과 결정은 그 탭의 버튼으로 한다</Text>
           </Box>
           {can && line(C.section('진행', W))}
           {can && (
@@ -541,7 +577,7 @@ export const register: Register = (on, options) => {
               ) : (
                 <Button key="cmd-pause" label="새 배정 일시 중지" onPress={() => act($, { kind: 'pause', reason: 'TUI에서 일시 중지' })} />
               )}
-              <Text dimColor>{snap.paused ? `중지됨: ${snap.paused.reason}` : '실행 중인 에이전트는 계속된다'}</Text>
+              <Text {...dimP}>{snap.paused ? `중지됨: ${snap.paused.reason}` : '실행 중인 에이전트는 계속된다'}</Text>
             </Box>
           )}
           {can && line(C.section('자리 비움 (밤새 맡길 때)', W))}
@@ -555,7 +591,7 @@ export const register: Register = (on, options) => {
                   <Button key="cmd-away-previews" label="자리 비움 + 미리보기 자동 승인" onPress={() => act($, { kind: 'away', previews: true })} />
                 </Box>
               )}
-              <Text dimColor>{snap.away ? '복귀하면 자리 비운 동안 정한 것을 4번 탭에서 확인한다' : '화면·방향 결정은 추천안으로 정하고 계속한다. 의존성·호환 깨짐·환경·데이터는 기다린다'}</Text>
+              <Text {...dimP}>{snap.away ? '복귀하면 자리 비운 동안 정한 것을 4번 탭에서 확인한다' : '화면·방향 결정은 추천안으로 정하고 계속한다. 의존성·호환 깨짐·환경·데이터는 기다린다'}</Text>
             </Box>
           )}
           {can && line(C.section('설계 검토 (큰 설계를 다른 검토자가 먼저 본다)', W))}
@@ -566,7 +602,7 @@ export const register: Register = (on, options) => {
                   ? <Button key={`review-${m}`} label={`● ${C.REVIEW_LABEL[m]}`} variant="primary" onPress={() => act($, { kind: 'reviewMode', mode: m })} />
                   : <Button key={`review-${m}`} label={C.REVIEW_LABEL[m] ?? m} plain onPress={() => act($, { kind: 'reviewMode', mode: m })} />
               ))}
-              <Text dimColor>deep 설계는 검토 PASS 뒤 구현한다. 묻기면 manager가 매번 결정으로 묻는다</Text>
+              <Text {...dimP}>deep 설계는 검토 PASS 뒤 구현한다. 묻기면 manager가 매번 결정으로 묻는다</Text>
             </Box>
           )}
           {can && line(C.section('동시 실행 한도', W))}
@@ -577,7 +613,7 @@ export const register: Register = (on, options) => {
                 const lim = sl?.limit ?? 1
                 return (
                   <Box key={`slot-${pool}`} columnGap={1}>
-                    <Text>{`${C.POOL_LABEL[pool]} ${pool === 'verify' ? `대기 ${sl?.queued ?? 0}` : `${sl?.used ?? 0}`}/${sl?.limit ?? '?'}`}</Text>
+                    <Text {...plainP}>{`${C.POOL_LABEL[pool]} ${pool === 'verify' ? `대기 ${sl?.queued ?? 0}` : `${sl?.used ?? 0}`}/${sl?.limit ?? '?'}`}</Text>
                     <Button key={`dec-${pool}`} label="−" plain onPress={() => act($, { kind: 'limit', pool, n: Math.max(1, lim - 1) })} />
                     <Button key={`inc-${pool}`} label="+" plain onPress={() => act($, { kind: 'limit', pool, n: Math.min(16, lim + 1) })} />
                   </Box>
@@ -585,7 +621,7 @@ export const register: Register = (on, options) => {
               })}
             </Box>
           )}
-          {!can && <Text dimColor>읽기 전용 설정(allowActions=false)이라 상태를 바꾸는 버튼은 숨겼다</Text>}
+          {!can && <Text {...dimP}>읽기 전용 설정(allowActions=false)이라 상태를 바꾸는 버튼은 숨겼다</Text>}
           {line(C.section('같은 일을 하는 명령', W))}
           <Button key="toggle-help" label={view.expanded === 'help' ? '명령어 접기' : '명령어 보기'} onPress={() => setView($, v => ({ ...v, expanded: v.expanded === 'help' ? null : 'help' }))} />
           {view.expanded === 'help' && C.HELP.flatMap((text, i) => C.wrapText(text, W, 3).map((t, j) => (
@@ -603,21 +639,21 @@ export const register: Register = (on, options) => {
           <Button key="open-dashboard" label="미리보기 대시보드 열기(브라우저)" onPress={async () => setView($, v => ({ ...v, lastAction: 'ℹ ' }))
             .then(() => openPreview($, null, null))
             .then(text => setView($, v => ({ ...v, lastAction: `ℹ ${C.fit(text, 100)}` })))} />
-          <Text bold color="claude">사용자 결정 {open.length}건</Text>
-          {open.length === 0 && <Text dimColor>열린 결정이 없다</Text>}
+          {line(C.section(`사용자 결정 ${open.length}건`, W))}
+          {open.length === 0 && <Text {...dimP}>열린 결정이 없다</Text>}
           {open.map(d => (
             <Box key={`dec-${d.id}`} flexDirection="column" marginBottom={1}>
               {line([{ text: `? ${d.id} `, tone: 'warn', bold: true }, { text: d.title }, { text: ` · ${d.kind} · 작업 ${d.tasks.join(',') || '-'}`, tone: 'dim' },
                 ...(d.hold === 'merge' ? [{ text: ' · 통합만 대기(구현은 진행)', tone: 'info' as C.Tone }] : []),
                 ...(d.ask_user ? [{ text: ' · 직접 정함', tone: 'warn' as C.Tone }] : [])])}
-              <Text wrap="wrap">{d.question}</Text>
+              <Text {...plainP} wrap="wrap">{d.question}</Text>
               {d.options.map(o => (
                 <Box key={`opt-${d.id}-${o.key}`} flexDirection="column">
                   {line([{ text: `  ${o.key}${o.key === d.recommend ? ' ★추천' : ''} `, bold: true, tone: o.key === d.recommend ? 'ok' : 'plain' }, { text: o.label }])}
                   {(o.pros || o.cons) && line([{ text: `    + ${o.pros || '-'}  − ${o.cons || '-'}`, tone: 'dim' }])}
                 </Box>
               ))}
-              {d.why && <Text dimColor wrap="wrap">추천 이유: {d.why}</Text>}
+              {d.why && <Text {...dimP} wrap="wrap">추천 이유: {d.why}</Text>}
               {can && (
                 <Box columnGap={1} flexWrap="wrap">
                   {d.options.map(o => (
@@ -627,8 +663,8 @@ export const register: Register = (on, options) => {
               )}
             </Box>
           ))}
-          <Text bold color="claude">미리보기 검토 {waiting.length}건</Text>
-          {waiting.length === 0 && <Text dimColor>검토를 기다리는 미리보기가 없다</Text>}
+          {line(C.section(`미리보기 검토 ${waiting.length}건`, W))}
+          {waiting.length === 0 && <Text {...dimP}>검토를 기다리는 미리보기가 없다</Text>}
           {waiting.map(t => {
             const v = t.preview.versions[t.preview.versions.length - 1]
             if (!v) return null
@@ -664,7 +700,7 @@ export const register: Register = (on, options) => {
           })}
           {C.pendingAway(snap).length > 0 && (
             <Box columnGap={1} flexWrap="wrap">
-              <Text bold color="suggestion">{`☾ 자리 비운 동안 자동으로 정한 것 ${C.pendingAway(snap).length}건`}</Text>
+              {line(C.section(`☾ 자리 비운 동안 자동으로 정한 것 ${C.pendingAway(snap).length}건`, Math.max(10, W - 16)))}
               {can && <Button key="keep-all" label="모두 이대로 둠" onPress={async () => { for (const x of C.pendingAway(snap)) await act($, { kind: 'awayReview', key: x.key, redo: false }) }} />}
             </Box>
           )}
@@ -689,6 +725,17 @@ export const register: Register = (on, options) => {
       )
     }
 
+    const docBox = (d: DocView) => (
+      <Box key={`docbox-${d.task}`} flexDirection="column" marginBottom={1}>
+        {line(C.section(`문서 · ${d.path}`, W))}
+        {d.error
+          ? <Text {...toneP('err')} wrap="wrap">{d.error}</Text>
+          : d.lines.map((t, i) => <Text key={`doc-l-${i}`} {...(t.startsWith('#') ? { ...toneP('accent'), bold: true } : plainP)} wrap="wrap">{t || ' '}</Text>)}
+        {!d.error && (d.more ?? 0) > 0 && <Text {...dimP}>{`… 아래 ${d.more}줄은 파일에서 본다`}</Text>}
+        <Button key="doc-close" label="문서 닫기" onPress={() => update($, docA, () => null)} />
+      </Box>
+    )
+
     const tasksTab = () => (
       <Box flexDirection="column">
         <Box columnGap={1}>
@@ -707,7 +754,7 @@ export const register: Register = (on, options) => {
           {view.taskMode === 'list' && view.filter === 'all' && snap.tasks.some(t => t.state === 'COMPLETED' || t.state === 'CANCELLED') && (
             <Button key="toggle-done-tasks" label={view.showDoneTasks ? '완료 접기' : '완료 펼치기'} onPress={() => setView($, v => ({ ...v, showDoneTasks: !v.showDoneTasks }))} />
           )}
-          <Text dimColor>{view.taskMode === 'list' ? '줄을 누르면 담당 경로·완료 기준을 펼친다' : '기록된 시작·끝 시각으로 그린다'}</Text>
+          <Text {...dimP}>{view.taskMode === 'list' ? '줄을 누르면 담당 경로·완료 기준을 펼친다' : '기록된 시작·끝 시각으로 그린다'}</Text>
         </Box>
         {view.taskMode === 'timeline'
           ? lines(C.timelineLines(snap, now, W))
@@ -721,18 +768,30 @@ export const register: Register = (on, options) => {
                     const t = snap.tasks.find(x => x.id === r.id)
                     return t && C.canReprioritize(t) ? (
                       <Box columnGap={1}>
-                        <Text>{`   우선순위 p${t.priority}`}</Text>
+                        <Text {...plainP}>{`   우선순위 p${t.priority}`}</Text>
                         <Button key={`pri-up-${t.id}`} label="▲" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority + 1 })} />
                         <Button key={`pri-down-${t.id}`} label="▼" plain onPress={() => act($, { kind: 'priority', task: t.id, n: t.priority - 1 })} />
-                        <Text dimColor>높을수록 먼저 배정</Text>
+                        <Text {...dimP}>높을수록 먼저 배정</Text>
                       </Box>
                     ) : null
                   })()}
+                  {view.expanded === r.id && (() => {
+                    const t = snap.tasks.find(x => x.id === r.id)
+                    const note = t?.notes?.[t.notes.length - 1]
+                    return note ? (
+                      <Box columnGap={1}>
+                        <Text {...plainP}>{'   '}</Text>
+                        <Button key={`doc-${r.id}`} label={doc?.task === r.id ? '문서 다시 읽기' : '설계·조사 문서 보기'} onPress={() => openDoc($, r.id ?? '', note)} />
+                        <Text {...dimP}>Pane 안에서 읽기만 한다</Text>
+                      </Box>
+                    ) : null
+                  })()}
+                  {view.expanded === r.id && doc?.task === r.id && docBox(doc)}
                   {can && view.expanded === r.id && snap.tasks.find(t => t.id === r.id)?.state === 'BLOCKED' && (
                     <Box columnGap={1}>
-                      <Text>{'   '}</Text>
+                      <Text {...plainP}>{'   '}</Text>
                       <Button key={`unblock-${r.id}`} label="보류 해제" onPress={() => act($, { kind: 'unblock', task: r.id ?? '' })} />
-                      <Text dimColor>원인이 풀렸을 때만 누른다. manager가 다시 배정한다</Text>
+                      <Text {...dimP}>원인이 풀렸을 때만 누른다. manager가 다시 배정한다</Text>
                     </Box>
                   )}
                 </Box>
@@ -778,14 +837,14 @@ export const register: Register = (on, options) => {
     }
 
     const header = lines(C.headerLines(snap, meta, runs, now, warns, W, curRate * 1000, usage))
-    const footer = view.lastAction ? <Text dimColor wrap="wrap">{view.lastAction}</Text> : null // 경로를 자르지 않는다
+    const footer = view.lastAction ? <Text {...dimP} wrap="wrap">{view.lastAction}</Text> : null // 경로를 자르지 않는다
 
     // 넓은 자리에서는 표 위주 탭 옆에 에이전트 목록을 붙인다. 버튼이 많은 탭은 한 줄로 쓴다
     if (layout === 'wide' && view.tab !== 'commands' && view.tab !== 'decisions') {
       const left = Math.floor(W * 0.62)
       const right = W - left - 2
       return (
-        <Box flexDirection="column" width={W}>
+        <Box flexDirection="column" width={W} {...bg}>
           {header}
           {tabs}
           <Box columnGap={2}>
@@ -800,7 +859,7 @@ export const register: Register = (on, options) => {
       )
     }
     return (
-      <Box flexDirection="column" width={W}>
+      <Box flexDirection="column" width={W} {...bg}>
         {header}
         {tabs}
         {body(view.tab, W)}

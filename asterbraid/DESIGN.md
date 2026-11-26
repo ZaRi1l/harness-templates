@@ -55,6 +55,11 @@
 | 가끔 쓰는 절차 | `asterbraid-procedures` 스킬(막힘·중간 인계·끝). manager.md는 원래 크기 안 | 지침은 띄울 때마다 읽혀 토큰이 된다. 핵심 규칙이 빠지지 않는지는 테스트(`TestAgentRules`)가 지킨다 |
 | git 시간 제한 | sched의 git 호출 100초, 잠금을 쥔 동안 git마다 잠금 시각 갱신(두 autonomous 템플릿) | 잠금을 쥔 채 git이 멈추면 120초 뒤 다른 프로세스가 잠금을 치우고 함께 쓴다(외부 검수 지적). PID 생존 확인은 Windows에서 `os.kill(pid, 0)`이 프로세스를 끝내 쓰지 않는다 |
 | 설치 백업 (2026-11-26) | 바꾸기 전 원본을 `.claude/asterbraid.backup/<시각>/`에, 실패하면 되돌리고 `rollback` 제공(최근 3개) | 중간 실패로 새 지침과 옛 sched.py가 섞이면 이상하게 돈다. 하네스를 모르는 사용자도 되돌릴 수 있게 |
+| 조사·설계 산출물 (e2e6) | `start --pool research|design`이 확정 경로 `output`을 준다. researcher·architect 지침에 "요청된 산출물이자 다음 도구의 입력". 보고만 오면 manager가 원문을 옮겨 쓰고 닫는다(우회 아님) | e2e6: Claude Code가 서브에이전트 지시 끝에 붙이는 "report·findings .md를 쓰지 말 것" 안내가 지침을 이겨 진단 문서가 안 생겼고, `done --close`가 거부돼 진단 작업 3개가 보류로 쌓였다. 프로그램으로 강제하지 않고(`--from-stdin` 같은 새 길은 만들지 않음) 경로를 확정하고 대체 절차를 둔다 |
+| 정리의 옛 worktree (e2e6) | cleanup이 옛 브랜치를 체크아웃한 옛 worktree를 찾아 함께 지우고, 작업마다 실패를 따로 잡는다. 본 체크아웃의 `.asterbraid-tmp/<ID>`도 지운다(두 autonomous 템플릿) | e2e6: `branch -d`가 옛 worktree 때문에 실패해 명령 전체가 멈췄고, 이미 지운 작업도 `cleaned=false`로 남았다 |
+| 엔진 버전 (e2e6) | 상태 파일에 쓴 sched의 `engine`을 남기고, 더 새 엔진이 쓴 상태는 옛 sched가 거부한다(`sched sync` 안내). update는 하네스 커밋을 안내한다 | e2e6: update 뒤에도 진행 중 worktree에는 옛 sched가 남아 새 상태를 고칠 수 있었다. 이번 버전부터 지켜진다(이미 설치된 옛 sched는 검사가 없다) |
+| 관례 문서 알림 (e2e6) | 지도(MAP)는 있는데 관례(CONVENTIONS)가 없으면 `next`의 `attention`에 알린다 | e2e6: 관례 기능 전에 지도를 만든 프로젝트는 update 뒤에도 지시문마다 `conventions=null`이었다 |
+| 화면 규칙·색 (e2e6 뒤) | 글자는 제목(구분선)·본문·설명 세 단계, 표 ID는 자르지 않는다. 색은 core의 표 한 곳에서(theme·night). 설계·조사 문서와 설계 검토 결과는 작업 탭에서 읽기만 | 터미널은 글자 크기가 하나라 굵기·흐림·구분선이 탭마다 다르면 크기가 달라 보였다. 문서 보기는 `docs/asterbraid/` 안 `.md`만(실제 경로로 확인) |
 
 ## 공통 코드 정책
 | 파일 | 정책 |
@@ -74,7 +79,7 @@
 | 대시보드 데이터의 `</script>` 탈출 방지, 화면 소스 분리 | 프로그램 + 테스트, 실제 브라우저(Edge headless)로 렌더링 확인 |
 | Mod: marker 연결, 승인 argv·해시, 읽기 전용, 폴더 밖 미리보기 거부, 그리기만으로 기록 안 함, 손상 스냅샷 표시, 경고 판정 | 엔진 테스트 도구(`claude plugin test`) + 타입 검사 |
 | manager가 marker·결정·note를 지침대로 쓰는지, 사용자 답을 정확히 옮기는지 | 지침 |
-| Pane 배치, 자동 열기, `/plugin` 활성 표시, 브라우저 열기, `tellManager` 메모 | 미확인(실제 세션 E2E 전) |
+| Pane 배치, 자동 열기, `/plugin` 활성 표시, 브라우저 열기 | 실제 세션 e2e로 확인. `tellManager` 메모, 밤하늘 색의 실제 표시는 미확인 |
 
 ## 넣지 않은 것
 - 대시보드 HTML의 승인 버튼과 로컬 승인 서버, Mod의 복구·정리·통합 실행, 에이전트 강제 종료.

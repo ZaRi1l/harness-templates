@@ -152,6 +152,8 @@ export type QueueFilter = 'all' | 'active' | 'waiting' | 'blocked' | 'done'
 export type View = {
   tab: Tab
   layout: Layout | null
+  /** 색(4-15). null이면 설정값 */
+  palette: 'theme' | 'night' | null
   filter: QueueFilter
   taskMode: TaskMode
   expanded: string | null
@@ -167,6 +169,9 @@ export type View = {
 
 export type Usage = { costUsd: number | null; contextPct: number | null }
 
+/** Pane 안에서 연 설계·조사 문서(읽기만). */
+export type DocView = { task: string; path: string; lines: string[]; more?: number; error: string | null }
+
 declare module 'claude-code' {
   interface PluginState {
     'asterbraid-dashboard': {
@@ -176,6 +181,7 @@ declare module 'claude-code' {
       activity: Shaped<Activity[]>
       view: Shaped<View>
       usage: Shaped<Usage>
+      doc: Shaped<DocView | null>
     }
   }
 }

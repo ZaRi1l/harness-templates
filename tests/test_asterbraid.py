@@ -313,6 +313,34 @@ class TestCleanupDryRun(ModsCase):
         self.assertTrue(self.state("ENV")["cleaned"])
 
 
+    def test_old_branch_checked_out_in_old_worktree_is_cleaned(self):
+        """e2e6 E6-3·E6-9: 재작업을 새 worktree에서 제출하면 옛 브랜치가 옛 worktree에 남아 branch -d가 실패했고,
+        cleanup 전체가 멈춰 cleaned가 false로 남았다. 본 체크아웃의 .asterbraid-tmp/<ID>도 남았다."""
+        self.add("A", paths="src/a.py")
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+        w1 = self.worktree("A", {"src/a.py": "A = 1\n"})
+        self.ok("submit", "A", cwd=w1)
+        self.ok("fail", "A", "--reason", "다시")
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+        w2 = self.tmp / "wt-A2"
+        self.repo.git("worktree", "add", "-q", "-b", "task-A2", str(w2), "task-A")
+        self.commit(w2, {"src/a.py": "A = 2\n"}, "A2")
+        self.assertEqual(self.repo.run("verify.py", args=("--target", str(w2))).returncode, 0)
+        self.ok("submit", "A", cwd=w2)
+        self.ok("start", "A", "--pool", "verify", "--agent", "v1")
+        self.ok("evidence", "A", "--verifier", "v1", "--verdict", "PASS", "--sha", self.repo.git("rev-parse", "HEAD", cwd=w2))
+        r = self.integrate("A")
+        self.assertEqual(r[:2], (0, "MERGED"), r)
+        tmp = Path(self.ok("notes-dir", "A")["notes_dir"])
+        (tmp / "check.py").write_text("print(1)\n", encoding="utf-8")
+        plan = self.ok("cleanup", "--dry-run")["A"]["would_remove"]
+        self.assertEqual(sorted(plan["branches"]), ["task-A", "task-A2"])
+        self.assertEqual(len(plan["old_worktrees"]), 1)
+        self.assertEqual(self.ok("cleanup")["A"], {"cleaned": True})
+        self.assertFalse(w1.exists() or w2.exists() or tmp.exists())
+        self.assertEqual(self.repo.git("branch", "--list", "task-A*"), "")
+        self.assertTrue(self.state("A")["cleaned"])
+
 class TestAwayMode(ModsCase):
     """4-5: 밤새 맡길 때 사용자가 미리 위임한 범위(화면·방향 결정, 원하면 미리보기)만 추천안으로 정한다."""
 
@@ -384,6 +412,25 @@ class TestSettingsWarning(ModsCase):
         self.assertTrue(self.ok("status", "--json")["warnings"])
 
 
+class TestEngineVersion(ModsCase):
+    """e2e6 E6-7: update 뒤에도 진행 중 worktree에는 옛 sched가 남아 새 상태 파일을 고칠 수 있었다."""
+
+    def test_older_sched_refuses_state_written_by_newer_one(self):
+        self.add("A")
+        path = self.repo.path / ".git/claude-auto/state.json"
+        st = json.loads(path.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(st["engine"], 1)  # 쓴 sched의 엔진 버전을 남긴다
+        st["engine"] += 1  # 더 새 sched가 쓴 상태
+        path.write_text(json.dumps(st), encoding="utf-8")
+        code, out, err = self.sched("status")
+        self.assertNotEqual(code, 0)
+        self.assertIn("sched sync", out + err)
+        self.repo.git("worktree", "add", "-q", "-b", "version-recovery", str(self.tmp / "version-wt"), "integration")
+        before = path.read_bytes()
+        self.assertEqual(self.ok("sync", "A", cwd=self.tmp / "version-wt")["result"], "CLEAN")
+        self.assertEqual(path.read_bytes(), before)  # 복구는 상태를 쓰지 않는다
+
+
 class TestProjectMap(ModsCase):
     """시작 준비 9: 기존 프로젝트의 지도는 researcher 작업(MAP)으로 만들고 노트와 함께 닫는다."""
 
@@ -395,17 +442,22 @@ class TestProjectMap(ModsCase):
                 "--paths", "docs/asterbraid/research/", "--criteria", "구조 지도 문서")
         self.add("A", paths="src/")
         self.assertEqual([t["id"] for t in self.ok("next", "--pool", "implement")["dispatch"]], ["A"])  # 지도를 기다리지 않는다
-        self.ok("start", "MAP", "--pool", "research", "--agent", "researcher")
+        out = self.ok("start", "MAP", "--pool", "research", "--agent", "researcher")
+        self.assertRegex(out["output"], r"^docs/asterbraid/research/\d{4}-\d{2}-\d{2}-\d{4}-MAP\.md$")  # e2e6 E6-1
         rel = "docs/asterbraid/research/2026-11-26-0100-MAP.md"
         (self.repo.path / rel).parent.mkdir(parents=True, exist_ok=True)
         (self.repo.path / rel).write_text("색인이다. 판단은 실제 코드로 한다\n", encoding="utf-8")
         self.assertEqual(self.ok("done", "MAP", "--close", "--notes", rel)["state"], "COMPLETED")
         # 같은 작업이 코드 관례 문서도 남기면 next가 두 경로를 함께 준다(지시문에 넣는다)
-        self.assertEqual(self.ok("next", "--pool", "implement")["conventions"], None)
+        nxt = self.ok("next", "--pool", "implement")
+        self.assertEqual(nxt["conventions"], None)
+        # e2e6 E6-8: update로 관례가 생기기 전 지도만 있는 프로젝트는 관례 문서가 계속 빠졌다. 한 번 만들라고 알린다
+        self.assertIn("CONVENTIONS", [x["id"] for x in nxt["attention"]])
         conv = "docs/asterbraid/research/2026-11-26-0100-CONVENTIONS.md"
         (self.repo.path / conv).write_text("관례 색인이다. 형식은 설정 파일을 따른다\n", encoding="utf-8")
         nxt = self.ok("next", "--pool", "implement")
         self.assertEqual((nxt["map"], nxt["conventions"]), (rel, conv))
+        self.assertNotIn("CONVENTIONS", [x["id"] for x in nxt["attention"]])
 
     def test_conventions_rules_reach_the_agents_that_write_code(self):
         claude = Path(base.__file__).resolve().parent.parent / MODS / ".claude"
@@ -763,7 +815,8 @@ class TestInstaller(unittest.TestCase):
         (tpl / ".claude/agents/researcher.md").unlink()
         plan = self.ok("update", str(self.target), template=tpl)
         self.assertIn("verifier.md", plan)
-        self.ok("update", str(self.target), "--apply", template=tpl)
+        out = self.ok("update", str(self.target), "--apply", template=tpl)
+        self.assertIn("sched sync", out)  # e2e6 E6-7: 커밋해야 진행 중 worktree가 새 하네스를 받는다
         self.assertTrue((self.target / ".claude/agents/manager.md").read_text(encoding="utf-8").endswith("새 버전\n"))
         self.assertEqual((self.target / ".claude/agents/verifier.md").read_text(encoding="utf-8"), "내가 고침\n")
         self.assertEqual((self.target / ".claude/hooks/verify.config.json").read_text(encoding="utf-8"), "{}")  # 프로젝트 설정
@@ -1054,7 +1107,9 @@ class TestAgentRules(unittest.TestCase):
                        "팀원에게 시키지 않는다",  # 5-4·E5-5
                        "`attention`", "`--ask-user`", "`--hold merge`", "`TaskStop`",  # E5-1, 5-1, E5-8, 5-6
                        "`start ID --pool verify --agent 이름`", "`next --pool review`",  # E5-2, 5-19
-                       "하네스·도구 문제", "asterbraid-procedures", "asterbraid-bootstrap"):
+                       "하네스·도구 문제", "asterbraid-procedures", "asterbraid-bootstrap",
+                       "산출물: `output` 경로", "옮겨 쓰고 닫는다(우회 아님)",  # e2e6 E6-1·E6-2
+                       "COMPLETED·CANCELLED·BLOCKED", "TaskStop이 거부되면"):  # e2e6 E6-4
             self.assertIn(phrase, m)
         self.assertIn("TaskStop", m.split("---", 2)[1])  # tools에 있어야 쓸 수 있다
         self.assertLessEqual(len(m.splitlines()), 109)
@@ -1085,6 +1140,15 @@ class TestAgentRules(unittest.TestCase):
         self.assertNotIn("Write", re.search(r"^disallowedTools:(.*)$", v, re.M).group(1))
         self.assertIn("막힘 진단", self.text("agents/researcher.md"))
         self.assertIn("인수 테스트 목록", self.text("skills/architecture-design/SKILL.md"))
+
+    def test_research_and_design_outputs_are_requested_files(self):
+        """e2e6 6-f: "요청 없는 .md를 만들지 않는다" 기본 지시로 결과 파일을 안 써서 진단 작업이 보류로 쌓였다."""
+        for rel in ("agents/researcher.md", "agents/architect.md"):
+            self.assertIn("요청된 산출물", self.text(rel))
+        self.assertIn("manager가 옮김", self.text("skills/asterbraid-procedures/SKILL.md"))  # 보고만 와도 닫는 길
+        # 6-e: 사용자가 정한 관례는 표시하고 새 코드에서 코드보다 우선
+        self.assertIn("[사용자 지정]", self.text("agents/researcher.md"))
+        self.assertIn("[사용자 지정]", self.text("asterbraid.md"))
 
 
 class TestCommonCode(ModsCase):

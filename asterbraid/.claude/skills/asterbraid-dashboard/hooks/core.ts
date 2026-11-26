@@ -18,10 +18,24 @@ export const REVIEW_LABEL: Record<string, string> = { off: '끔', deep: 'deep �
 /** 우선순위는 배정 순서에만 쓰인다. 이미 배정된(진행 중) 작업에는 효과가 없어 버튼을 보이지 않는다. */
 export const PRIORITY_STATES = ['PENDING', 'READY', 'AWAITING_APPROVAL', 'RETRY', 'BLOCKED']
 export const canReprioritize = (t: SnapTask) => PRIORITY_STATES.includes(t.state)
-export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, filter: 'all', taskMode: 'list', expanded: null, errorsOnly: false, showDone: false, showDoneTasks: false, pendingRevise: null, lastAction: null }
+export const DEFAULT_VIEW: View = { tab: 'overview', layout: null, palette: null, filter: 'all', taskMode: 'list', expanded: null, errorsOnly: false, showDone: false, showDoneTasks: false, pendingRevise: null, lastAction: null }
 export const EMPTY_META: SnapMeta = { root: null, stateDir: null, readAtMs: 0, checkedMs: 0, mtimeMs: 0, error: null, stale: false }
 
 export type Tone = 'ok' | 'warn' | 'err' | 'dim' | 'accent' | 'info' | 'plain'
+
+// 색은 이 표 한 곳에서 정한다(6-1·4-15). theme는 터미널 테마 키(밝은 터미널도 맞는다), night는 짙은 남색 바탕의 밤하늘
+export type Palette = 'theme' | 'night'
+export const PALETTES: readonly Palette[] = ['theme', 'night']
+export const PALETTE_LABEL: Record<Palette, string> = { theme: '테마', night: '밤하늘' }
+export const NIGHT_BG = '#0d1330'
+const TONES: Record<Palette, Record<Tone, string | undefined>> = {
+  theme: { ok: 'success', warn: 'warning', err: 'error', accent: 'claude', info: 'suggestion', dim: undefined, plain: undefined },
+  // 제목·별은 별빛, 실행은 하늘, 완료는 연두, 대기·설명은 흐린 보라, 경고는 주황
+  night: { ok: '#a6e3a1', warn: '#ffb86b', err: '#ff7b8a', accent: '#f5e6a8', info: '#89c9ff', dim: '#8c88b8', plain: '#dde3f6' },
+}
+export const toneColor = (p: Palette, t: Tone) => TONES[p][t]
+/** theme에서는 dim을 dimColor로 그린다(색을 정하지 않는다). night는 흐린 보라 색을 직접 쓴다. */
+export const toneDim = (p: Palette, t: Tone) => p === 'theme' && t === 'dim'
 export type Seg = { text: string; tone?: Tone; bold?: boolean }
 export type Line = Seg[]
 
@@ -64,6 +78,7 @@ export const normalizeView = (v: unknown): View => {
   return {
     tab: TABS.includes(x.tab as Tab) ? (x.tab as Tab) : 'overview',
     layout: (['auto', 'mini', 'compact', 'wide'] as const).includes(x.layout as Layout) ? (x.layout as Layout) : null,
+    palette: PALETTES.includes(x.palette as Palette) ? (x.palette as Palette) : null,
     filter: FILTERS.includes(x.filter as QueueFilter) ? (x.filter as QueueFilter) : 'all',
     taskMode: x.taskMode === 'timeline' ? 'timeline' : 'list',
     expanded: typeof x.expanded === 'string' ? x.expanded : null,
@@ -247,6 +262,7 @@ export type Action =
   | { kind: 'awayReview'; key: string; redo: boolean }
   | { kind: 'reviewMode'; mode: string }
   | { kind: 'rate'; seconds: number }
+  | { kind: 'palette'; palette: Palette }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
@@ -277,6 +293,7 @@ export const HELP = [
   '/asterbraid unblock ID            보류 해제 (sched.py가 재작업·준비 상태로 되돌린다)',
   '/asterbraid away [previews] | back  자리 비움(화면·방향 결정은 추천안, previews면 미리보기도 자동 승인) / 복귀',
   '/asterbraid rate 1|2|5|10         화면 갱신 간격(초)',
+  '/asterbraid palette theme|night   색: 터미널 테마 / 밤하늘',
   '/asterbraid review off|deep|ask   설계 검토(deep 설계를 다른 검토자가 PASS해야 구현) 끔 / 켬 / 매번 묻기',
 ]
 
@@ -331,6 +348,10 @@ export const parseCommand = (args: string): Action => {
   if (head === 'rate') {
     const k = Number(rest[0])
     return (RATES as readonly number[]).includes(k) ? { kind: 'rate', seconds: k } : { kind: 'error', message: '/asterbraid rate 1|2|5|10' }
+  }
+  if (head === 'palette') {
+    const p = rest[0] as Palette
+    return PALETTES.includes(p) ? { kind: 'palette', palette: p } : { kind: 'error', message: '/asterbraid palette theme|night' }
   }
   if (head === 'review') {
     const m = rest[0] ?? ''
@@ -456,6 +477,11 @@ export const isInside = (child: string, parent: string, caseless: boolean) => {
 }
 
 export const isPreviewFile = (file: string) => /\.html?$/i.test(file)
+/** Pane에서 열어 볼 AI 문서(설계·조사 노트). 저장소 기준 상대 경로가 docs/asterbraid/ 안의 .md일 때만 전체 경로를 준다. */
+export const docPath = (root: string, rel: string): string | null => {
+  const full = joinPath(root, rel)
+  return /\.md$/i.test(rel) && isInside(full, joinPath(root, 'docs/asterbraid'), false) ? full : null
+}
 
 /** 열 미리보기 파일. 작업이 없으면 대시보드, 버전이 없으면 최신 버전. */
 export const previewTarget = (snap: Snapshot | null, task: string | null, version: number | null): { file: string; label: string } | { error: string } => {
@@ -750,7 +776,7 @@ export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: nu
     { text: ` ${p.done}/${p.of} 완료`, bold: true },
     { text: p.pct === null ? '' : ` ${p.pct}% (작업 수 기준)`, tone: 'dim' },
   ])
-  const missing = unobservedHolders(snap, runs).length
+  const missing = unobservedHolders(snap, runs, now).length
   lines.push([
     { text: `실행 ${runningRuns(runs).length} · 배정 ${slotUsed(snap)} · 검증 ${snap.counts.VERIFYING ?? 0} · 통합 대기 ${snap.counts.READY_TO_MERGE ?? 0}`, tone: 'dim' },
     ...(missing ? [{ text: ` · 실행 미확인 ${missing}`, tone: 'warn' as Tone }] : []),
@@ -759,11 +785,11 @@ export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: nu
   ])
   const stuck = stuckReason(snap, runs, now)
   if (stuck) lines.push([{ text: `■ 멈춤 ${fmtDur(now - (ms(snap.generated_at) ?? now))}째 — ${stuck}`, tone: 'err', bold: true }])
-  if (snap.away) lines.push([{ text: `☾ 자리 비움 중${snap.away.previews ? ' · 미리보기 자동 승인' : ''}`, tone: 'info', bold: true }, { text: '  → 7 명령 탭에서 복귀', tone: 'dim' }])
-  else if (pendingAway(snap).length) lines.push([{ text: `☾ 자리 비운 동안 정한 것 ${pendingAway(snap).length}건 확인`, tone: 'info', bold: true }, { text: '  → 4 승인·결정 탭', tone: 'dim' }])
   const wait = awaiting(snap).length
   const dec = openDecisions(snap).length
   if (wait || dec) lines.push([{ text: `▶ 사용자 차례: 미리보기 승인 ${wait} · 결정 ${dec}`, tone: 'warn', bold: true }, { text: '  → 4 승인·결정 탭', tone: 'dim' }])
+  if (snap.away) lines.push([{ text: `☾ 자리 비움 중${snap.away.previews ? ' · 미리보기 자동 승인' : ''}`, tone: 'info', bold: true }, { text: '  → 7 명령 탭에서 복귀', tone: 'dim' }])
+  else if (pendingAway(snap).length) lines.push([{ text: `☾ 자리 비운 동안 정한 것 ${pendingAway(snap).length}건 확인`, tone: 'info', bold: true }, { text: '  → 4 승인·결정 탭', tone: 'dim' }])
   if (snap.paused) lines.push([{ text: `⏸ 새 배정 일시 중지: ${snap.paused.reason}`, tone: 'warn' }, { text: '  → 7 명령 탭에서 재개', tone: 'dim' }])
   const blocked = snap.counts.BLOCKED ?? 0
   if (blocked) lines.push([{ text: `✗ 보류 ${blocked}건`, tone: 'err', bold: true }, { text: '  → 2 작업 탭', tone: 'dim' }])
@@ -885,6 +911,11 @@ export const queueLines = (snap: Snapshot, filter: QueueFilter, expanded: string
       if (t.forbid.length) push(kv('    금지', t.forbid.join(', ')))
       push(kv('    완료 기준', t.criteria))
       if (t.design_depth) push(kv('    설계', `${t.design_depth}${t.notes?.length ? ` · 노트 ${t.notes[t.notes.length - 1]}` : ''}`))
+      else if (t.notes?.length) push(kv('    노트', t.notes[t.notes.length - 1] ?? ''))
+      const rv = t.design_review
+      if (rv) push(kv('    설계 검토', `${rv.verdict}${rv.by ? ` · ${rv.by}` : ''}${rv.decision ? ` · 결정 ${rv.decision}` : ''}${rv.notes ? ` · ${rv.notes}` : ''}`,
+        rv.verdict === 'PASS' ? 'ok' : rv.verdict === 'FAIL' ? 'err' : 'plain'))
+      else if (t.review_pending) push(kv('    설계 검토', '기다리는 중(구현 전에 PASS가 필요하다)', 'warn'))
       push(kv('    배정', `${t.agent ?? '-'} · 시도 ${t.attempts ?? 0}`))
       if (t.reason) push(kv('    사유', t.reason))
     }
@@ -914,6 +945,7 @@ export type Config = {
   notify: boolean
   stallMs: number
   tellManager: boolean
+  palette: Palette
 }
 
 const clamp = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d)
@@ -930,6 +962,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => ({
   notify: o.notify !== false,
   stallMs: clamp(o.stallMinutes, 1, 120, 10) * 60_000,
   tellManager: o.tellManager === true,
+  palette: o.palette === 'night' ? 'night' : 'theme',
 })
 
 /** 대기(다시 쓰일 수 있는 idle)·끝남(끝났거나 더 쓰일 일이 없는 idle) 에이전트. */
@@ -1016,18 +1049,18 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
   const doneTasks = tasks.filter(x => x.rank === 2)
   const doneAgents = doneTasks.reduce((n, x) => n + x.rs.length, 0)
   if (doneTasks.length) {
-    out.push(head(`── 끝남 ${doneAgents}${showDone ? '' : ' (접힘)'} ──`))
+    out.push(section(`끝남 ${doneAgents}${showDone ? '' : ' (접힘)'}`, width))
     if (showDone) doneTasks.slice(0, 12).forEach(t => group(t.id, t.rs))
   }
   const unlinked = runs.filter(r => !r.task)
   if (unlinked.length && (showDone || unlinked.some(r => r.status === 'running'))) {
-    out.push(head('미연결(marker 없음)'))
+    out.push(section('미연결(marker 없음)', width))
     const shown = [...unlinked].sort((a, b) => rank(a) - rank(b)).filter(r => showDone || r.status === 'running')
     shown.forEach((r, i) => row(r, i === shown.length - 1 ? '└─' : '├─'))
   }
-  const missing = unobservedHolders(snap, runs)
+  const missing = unobservedHolders(snap, runs, now)
   if (missing.length) {
-    out.push(head('슬롯은 잡혔지만 이 세션에서 실행이 관측되지 않은 작업'))
+    out.push(section('슬롯은 잡혔지만 이 세션에서 실행이 관측되지 않은 작업', width))
     for (const t of missing) out.push([{ text: `○ ${t.id} ${mark(t.state).label} · 배정 ${t.agent ?? '-'} #${t.attempts ?? 0}`, tone: 'warn' }])
     out.push([{ text: '  다른 세션에서 실행 중이거나, 세션이 끊겼을 수 있다(manager가 sched recover로 확인)', tone: 'dim' }])
   }
@@ -1046,8 +1079,9 @@ export const timelineLines = (snap: Snapshot, now: number, width: number): Line[
   const starts = tasks.map(t => ms(t.timeline[0]?.start) ?? now)
   const from = Math.min(...starts)
   const span = Math.max(1000, now - from)
-  const cols = Math.max(10, width - 12)
-  const out: Line[] = [[{ text: `${pad('', 11)}${fmtDur(span)} 전 → 지금 (칸당 ${fmtDur(span / cols)})`, tone: 'dim' }]]
+  const idW = Math.min(32, Math.max(6, ...tasks.map(t => strWidth(t.id)))) // ID는 자르지 않고 칸을 줄인다(6-1)
+  const cols = Math.max(10, width - idW - 2)
+  const out: Line[] = [[{ text: `${pad('', idW + 1)}${fmtDur(span)} 전 → 지금 (칸당 ${fmtDur(span / cols)})`, tone: 'dim' }]]
   for (const t of tasks) {
     const cells = Array<string>(cols).fill(' ')
     for (const seg of t.timeline) {
@@ -1058,7 +1092,7 @@ export const timelineLines = (snap: Snapshot, now: number, width: number): Line[
       const i1 = Math.max(i0 + 1, Math.ceil(((b - from) / span) * cols))
       for (let i = Math.max(0, i0); i < Math.min(cols, i1); i++) cells[i] = LANE[seg.state] ?? '?'
     }
-    out.push([{ text: `${pad(t.id, 10)} `, bold: true }, { text: cells.join(''), tone: mark(t.state).tone }])
+    out.push([{ text: `${pad(t.id, idW)} `, bold: true }, { text: cells.join(''), tone: mark(t.state).tone }])
   }
   out.push([{ text: 'r 조사 d 설계 p 미리보기 ? 승인대기 █ 구현 ↻ 재작업 ▒ 검증 ⇢ 병합대기 ≡ 병합 x 보류 · 대기', tone: 'dim' }])
   return out
@@ -1078,7 +1112,7 @@ export const gitLines = (snap: Snapshot, width: number, now = 0): Line[] => {
     { text: ` · 대기열 ${queue.length ? queue.map(t => `${mark(t.state).mark}${t.id}`).join(' → ') : '비었음'}`, tone: 'dim' },
   ])
   const log = snap.integration_log.slice(-5).reverse()
-  const idW = Math.min(18, Math.max(6, ...log.map(e => strWidth(e.task))))
+  const idW = Math.min(32, Math.max(6, ...log.map(e => strWidth(e.task)))) // ID는 자르지 않는다(6-1)
   if (!log.length) out.push([{ text: '통합 기록 없음', tone: 'dim' }])
   for (const e of log) {
     const ok = e.status === 'MERGED'
@@ -1092,7 +1126,7 @@ export const gitLines = (snap: Snapshot, width: number, now = 0): Line[] => {
   const live = snap.tasks.filter(t => t.branch && t.state !== 'CANCELLED' && !(t.state === 'COMPLETED' && t.cleaned))
   out.push(section('작업 브랜치', width))
   if (!live.length) out.push([{ text: '없음', tone: 'dim' }])
-  const tW = Math.min(18, Math.max(6, ...live.map(t => strWidth(t.id))))
+  const tW = Math.min(32, Math.max(6, ...live.map(t => strWidth(t.id))))
   for (const t of live) {
     const m = mark(t.state)
     const tail = t.state === 'COMPLETED' ? '정리 가능' : t.evidence.valid === null ? m.label : `검증 ${t.evidence.valid}/${t.evidence.required}`

@@ -50,10 +50,10 @@ color: purple
 
 | 할 일 | 명령 | 맡길 곳 |
 |---|---|---|
-| 조사 | `next --pool research` → `start ID --pool research --agent 이름` | researcher. 끝나면 네가 `done ID --notes 경로` |
-| 설계 | `next --pool design` → `start … --pool design` | architect(지시문에 `design_depth`, 이 계약에 기대는 작업). 끝나면 네가 `done` |
+| 조사 | `next --pool research` → `start ID --pool research --agent 이름` | researcher(지시문에 "산출물: `output` 경로"). 끝나면 `done ID --notes 경로` |
+| 설계 | `next --pool design` → `start … --pool design` | architect(`design_depth`, `output`, 이 계약에 기대는 작업). 끝나면 `done` |
 | 설계 검토 | `next --pool review` (출력의 `marker`) | verifier(설계 검토). FAIL이면 다시 설계 |
-| 조사·설계만으로 끝 | `done ID --close --notes 경로` | 구현이 필요 없으면 완료로 닫는다 |
+| 조사·설계만으로 끝 | `done ID --close --notes 경로` | 보고만 오고 파일이 없으면 원문을 `output`에 옮겨 쓰고 닫는다(우회 아님) |
 | 의존 바꾸기 | `deps ID --set A,B [--reason …]` | 구현 시작 전에만. 취소·재등록하지 않는다 |
 | 미리보기 | `next --pool preview` → `start … --pool preview` | designer(`sched preview ID --file …`로 등록) |
 | 승인 받기 | `next --pool approval` | `/asterbraid preview`를 알린다. 사용자가 본 버전으로 `approve ID --version N --sha <해시 12자>` / `revise …` |
@@ -67,16 +67,16 @@ color: purple
 - 구현 지시문: 작업 ID, 담당 경로·완료 기준·문서 경로·지도, 승인된 미리보기(버전·해시), 관련 결정의 응답.
   verifier 지시문: 작업 ID, worktree, head, `start`에 쓴 이름(증거는 이 이름으로만 기록된다), 맡은 관점.
 - 재작업(RETRY)은 `start`로 다시 배정한 뒤 같은 implementer에게 SendMessage로 새 marker와 사유를 보낸다. 없으면 새 implementer가 `sched sync ID`부터.
-- 코드 위치 찾기는 `Explore`에게. "background work/shells"로 안 끝나는 에이전트에게는 프로세스를 끄라고 한다.
-- **팀원 종료**: 그 팀원의 작업이 COMPLETED·CANCELLED이고, `deps`로 그 작업에 기대는 작업도 모두 끝났는지 `sched status`로 확인한 뒤 `TaskStop`(팀원 이름).
-  verifier는 그 작업의 통합 뒤. 마무리가 필요한 팀원만 먼저 SendMessage로 요청한다.
+- 코드 위치 찾기는 `Explore`에게. "background work"로 안 끝나는 에이전트에게는 프로세스를 끄라고 한다.
+- **팀원 종료**: 작업이 COMPLETED·CANCELLED·BLOCKED이고 `deps`로 기대는 작업도 끝났으면(`sched status`) 대기 중인 팀원을 `TaskStop`.
+  verifier는 통합 뒤. TaskStop이 거부되면(백그라운드 서브에이전트) 저절로 끝나니 다시 부르지 않는다.
 
 ## integrate 결과
-MERGED: 끝(의존하던 작업이 풀린다, 요구 문서 상태를 고친다). CONFLICT·FAIL: RETRY가 됐다. 다시 `start`하고 사유와 함께 `sched sync ID`부터 재작업.
+MERGED: 끝(요구 문서 상태를 고친다). CONFLICT·FAIL: RETRY가 됐다. 다시 `start`하고 사유와 함께 `sched sync ID`부터 재작업.
 REJECTED: 사유대로(검증 부족 → verifier, 커밋이 바뀜 → 다시 submit, 결정 대기 → 기다림). BUSY: 나중에. BLOCKED: 스킬의 "막힘".
 
 ## 사용자와 대화
-- 진행은 관제 화면(`/asterbraid`)이 보여 준다. 되풀이하지 않는다(Mod가 없으면 단계마다 요약).
+- 진행은 관제 화면(`/asterbraid`)이 보여 준다. 되풀이하지 않는다.
 - 대화에는 요구 확인, 분할 이유, 기술 판단과 근거, 대안, 못 푼 문제, 남은 위험, 결과를 담고 `sched note --kind strategy|decision|tech|split|risk|milestone|blocker --text … [--task ID]`로도 남긴다. 없는 진행률을 지어내지 않는다.
 
 ## 사용자 결정 (결정에 묶인 작업만 멈추고, 나머지는 계속)

@@ -66,7 +66,7 @@ from sched_view import *  # noqa: E402,F401,F403
 
 
 @contextlib.contextmanager
-def store(root: Path, write: bool = True):
+def store(root: Path, write: bool = True, recovery_read: bool = False):
     """상태를 잠그고 읽는다. 블록이 예외 없이 끝났을 때만 원자적으로 기록하고, 이어서 스냅샷을 기록한다."""
     d = state_dir(root)
     d.mkdir(parents=True, exist_ok=True)
@@ -76,8 +76,12 @@ def store(root: Path, write: bool = True):
             {"version": 1, "integration_branch": None, "limits": {}, "tasks": {}}
         for key, default in (("paused", None), ("decisions", {}), ("notes_log", []), ("away", None), ("away_log", [])):
             st.setdefault(key, default)
+        if st.get("engine", 0) > ENGINE and not (recovery_read and not write):
+            raise Refused(f"이 sched.py(엔진 {ENGINE})는 상태를 쓴 sched(엔진 {st['engine']})보다 옛것이다(하네스 업데이트 뒤의 옛 worktree). "
+                          "worktree면 `sched sync`로 통합 브랜치의 새 하네스를 받은 뒤 다시 한다")
         yield st
         if write:
+            st["engine"] = ENGINE
             atomic_write(path, st)
             write_snapshot(root, st)
 
@@ -130,6 +134,9 @@ def cmd_next(a, root, cfg):
         out = {"pool": a.pool, "dispatch": [{**brief(t), "design_depth": t.get("design_depth")} for t in picks],
                "waiting": waiting, "attention": attention(st), "map": project_map(root),
                "conventions": project_map(root, "CONVENTIONS")}
+        if out["map"] and not out["conventions"]:  # e2e6 E6-8: 관례 문서가 생기기 전 지도만 만든 프로젝트(업데이트 뒤)
+            out["attention"].append({"id": "CONVENTIONS", "state": "MISSING", "why": "지도(MAP)는 있는데 코드 관례(CONVENTIONS) 문서가 없다. "
+                                     "researcher 조사 작업 하나로 관례 문서만 한 번 만든다"})
         if a.pool in SLOT_STATE:
             out["free_slots"] = limit(st, cfg, a.pool) - used(st, a.pool)
         if a.pool == "verify":
@@ -188,7 +195,10 @@ def cmd_start(a, root, cfg):
         t["agent"] = a.agent
         t["attempts"] = t.get("attempts", 0) + 1
         t["history"][-1].update(pool=a.pool, attempt=t["attempts"])
-        return {**brief(t), "attempt": t["attempts"], "marker": marker(t["id"], a.pool, t["attempts"])}
+        out = {**brief(t), "attempt": t["attempts"], "marker": marker(t["id"], a.pool, t["attempts"])}
+        if a.pool in ("research", "design"):  # e2e6 E6-1: 확정 경로를 지시문에 "산출물: <경로>"로 넣는다(자리표시·"가능하면"이 아니라)
+            out["output"] = f"docs/asterbraid/{a.pool}/{datetime.now().strftime('%Y-%m-%d-%H%M')}-{t['id']}.md"
+        return out
 
 
 def start_verify(st: dict, cfg: dict, t: dict, a) -> dict:
@@ -529,7 +539,8 @@ def cmd_sync(a, root, cfg):
     wt = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
     if verify.same_path(wt, root):
         raise Refused("작업 worktree에서 실행한다")
-    with store(root, write=False) as st:
+    # sync만 최소 정보(작업 브랜치·통합 브랜치)를 읽어 새 엔진을 가져온다. 상태 쓰기는 여전히 거부한다.
+    with store(root, write=False, recovery_read=True) as st:
         t = get(st, a.id)
         sources = [st["integration_branch"]]
     current = git(wt, "rev-parse", "--abbrev-ref", "HEAD")
@@ -628,47 +639,78 @@ def cmd_recover(a, root, cfg):
     return {"actions": actions}
 
 
+def checked_out(root: Path) -> dict:
+    """브랜치 → 그 브랜치를 체크아웃한 worktree 경로(e2e6 E6-3: 옛 브랜치가 옛 worktree에 남아 branch -d가 실패했다)."""
+    out, cur = {}, None
+    for line in git(root, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            cur = line[len("worktree "):]
+        elif line.startswith("branch refs/heads/"):
+            out[line[len("branch refs/heads/"):]] = cur
+    return out
+
+
+def same_path(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return Path(a).resolve() == Path(b).resolve()
+
+
 def cmd_cleanup(a, root, cfg):
     results = {}
     # asterbraid 추가: --dry-run은 지울 worktree·브랜치만 보여 주고 아무것도 바꾸지 않는다
     with store(root, write=not a.dry_run) as st:
         integ = st["integration_branch"]
         busy = {t["worktree"] for t in st["tasks"].values() if t["state"] not in ("COMPLETED", "CANCELLED")}
+        holders = checked_out(root)
         for t in st["tasks"].values():
             if (a.ids and t["id"] not in a.ids) or t["state"] != "COMPLETED" or t["cleaned"]:
                 continue
+            tmp = root / TMP_DIR / t["id"]  # e2e6 E6-9: 본 체크아웃의 임시 폴더(git이 무시한다)도 함께 지운다
             wt, problems = t["worktree"], []
             if not t["head"] and not t["branch"] and not t["old_branches"] and not wt:
                 # asterbraid 추가(e2e4): 조사·설계만 하고 닫은 작업은 지울 것이 없다. 커밋 검사로 멈추지 않는다
                 if a.dry_run:
                     results[t["id"]] = {"cleaned": False, "would_remove": {"worktree": None, "branches": []}}
                 else:
+                    shutil.rmtree(str(tmp), ignore_errors=True)
                     t["cleaned"] = True
                     results[t["id"]] = {"cleaned": True}
                 continue
+            # 옛 브랜치를 아직 체크아웃한 옛 worktree(본 체크아웃·지금 worktree는 빼고)
+            old_wts = [holders[b] for b in t["old_branches"]
+                       if b in holders and not same_path(holders[b], str(root)) and not (wt and same_path(holders[b], wt))]
             if not is_ancestor(root, t["head"], integ):
                 problems.append("작업 커밋이 통합 브랜치에 없다")
             if t["branch"] in cfg["protected_branches"] or t["branch"] == integ:
                 problems.append("보호 대상 브랜치다")
-            if wt in busy:
+            if wt in busy or any(w in busy for w in old_wts):
                 problems.append("다른 진행 중 작업이 같은 worktree를 쓴다")
-            if wt and Path(wt).is_dir() and git(Path(wt), "status", "--porcelain"):
-                problems.append("worktree에 커밋 안 된 변경이나 추적 안 된 파일이 있다")
+            for w in [wt] + old_wts:
+                if w and Path(w).is_dir() and git(Path(w), "status", "--porcelain"):
+                    problems.append(f"worktree에 커밋 안 된 변경이나 추적 안 된 파일이 있다: {w}")
             if branch_head(root, t["branch"]) not in (None, t["head"]):
                 problems.append("브랜치에 통합되지 않은 새 커밋이 있다")
             if problems:
                 results[t["id"]] = {"cleaned": False, "why": problems}
                 continue
+            branches = [b for b in [t["branch"]] + t["old_branches"] if branch_head(root, b) and is_ancestor(root, b, integ)]
             if a.dry_run:
-                branches = [b for b in [t["branch"]] + t["old_branches"] if branch_head(root, b) and is_ancestor(root, b, integ)]
                 results[t["id"]] = {"cleaned": False, "would_remove": {
-                    "worktree": wt if wt and Path(wt).is_dir() else None, "branches": branches}}
+                    "worktree": wt if wt and Path(wt).is_dir() else None, "branches": branches,
+                    "old_worktrees": [w for w in old_wts if Path(w).is_dir()], "tmp": str(tmp) if tmp.is_dir() else None}}
                 continue
-            if wt and Path(wt).is_dir():
-                git(root, "worktree", "remove", wt)
-            for b in [t["branch"]] + t["old_branches"]:
-                if branch_head(root, b) and is_ancestor(root, b, integ):
+            try:  # 한 작업이 실패해도 나머지는 정리하고, 실패한 작업은 사유와 함께 cleaned=false로 남긴다(다음에 다시)
+                for w in [wt] + old_wts:
+                    if w and Path(w).is_dir():
+                        git(root, "worktree", "remove", w)
+                for b in branches:
                     git(root, "branch", "-d", b)
+            except Refused as e:
+                results[t["id"]] = {"cleaned": False, "why": [str(e)]}
+                continue
+            shutil.rmtree(str(tmp), ignore_errors=True)
             t["cleaned"] = True
             results[t["id"]] = {"cleaned": True}
     return results

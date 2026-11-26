@@ -365,3 +365,23 @@ class TestIntegration(AutoCase):
         self.assertTrue(wb.is_dir() and wc.is_dir())
         self.assertEqual(self.repo.git("branch", "--list", "task-A"), "")
         self.assertNotEqual(self.repo.git("branch", "--list", "task-C"), "")
+
+    def test_cleanup_removes_old_worktree_of_resubmitted_task(self):
+        """e2e6 E6-3: 재작업을 새 worktree·브랜치로 제출하면 옛 브랜치가 옛 worktree에 남아 `branch -d`가 실패했고,
+        cleanup 전체가 멈춰 이미 지운 작업도 cleaned=false로 남았다."""
+        self.add("A", paths="src/a.py")
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+        w1 = self.worktree("A", {"src/a.py": "A = 1\n"})
+        self.ok("submit", "A", cwd=w1)
+        self.ok("fail", "A", "--reason", "다시")
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+        w2 = self.tmp / "wt-A2"
+        self.repo.git("worktree", "add", "-q", "-b", "task-A2", str(w2), "task-A")
+        self.commit(w2, {"src/a.py": "A = 2\n"}, "A2")
+        self.assertEqual(self.repo.run("verify.py", args=("--target", str(w2))).returncode, 0)
+        self.ok("submit", "A", cwd=w2)
+        self.ok("evidence", "A", "--verifier", "v1", "--verdict", "PASS", "--sha", self.repo.git("rev-parse", "HEAD", cwd=w2))
+        self.assertEqual(self.integrate("A")[:2], (0, "MERGED"))
+        self.assertEqual(self.ok("cleanup")["A"], {"cleaned": True})
+        self.assertFalse(w1.exists() or w2.exists())
+        self.assertEqual(self.repo.git("branch", "--list", "task-A*"), "")

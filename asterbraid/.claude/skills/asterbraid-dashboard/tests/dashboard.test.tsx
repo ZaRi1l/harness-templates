@@ -234,7 +234,7 @@ const engine = (on: On, snap: Snapshot | string = SNAP, opts: { gitFails?: boole
     const kind = e.path.endsWith('.py') || e.path.endsWith('.json') || e.path.endsWith('.html') ? 'file' : 'dir'
     return { value: { kind, size: 1, mtimeMs: calls.live.mtime, isLink: false, ...(e.resolve ? { realPath: e.path } : {}) } }
   })
-  on('fs.read', () => ({ value: typeof calls.live.snap === 'string' ? calls.live.snap : JSON.stringify(calls.live.snap) }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('.md') ? '# 설계\n계약 본문' : typeof calls.live.snap === 'string' ? calls.live.snap : JSON.stringify(calls.live.snap) }))
   let spawned = 0
   on('agent.spawn', () => (opts.teammateOnly ? { model: 'sonnet', teammateId: `mate-${++spawned}@team` } : { model: 'sonnet', agentId: `ag-${++spawned}` }))
   return calls
@@ -838,4 +838,77 @@ test('현황 탭도 긴 작업 ID를 자르지 않고 제목을 줄인다', asyn
   const text = C.overviewLines(snap, [], 0, 90).map(l => l.map(s => s.text).join(''))
   expect(text.some(t => t.includes('RECURRING-FRONTEND '))).toBe(true)
   expect(text.every(t => C.strWidth(t) <= 90)).toBe(true)
+})
+
+test('4-15 밤하늘 색: 명령 탭에서 고르면 Pane 바탕과 글자색이 바뀌고 다시 열어도 남는다', async ($, on) => {
+  engine(on)
+  await start($)
+  expect(C.parseCommand('palette night')).toEqual({ kind: 'palette', palette: 'night' })
+  expect(C.parseCommand('palette pink').kind).toBe('error')
+  expect(C.toneColor('theme', 'ok')).toBe('success')
+  expect(C.toneColor('night', 'ok')).toMatch(/^#/)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-commands' })
+  await ui.press({ key: 'palette-night' })
+  expect((await ui.drawn() as { props?: Record<string, unknown> }).props?.backgroundColor).toBe(C.NIGHT_BG)
+  expect((await ui.findAll({ type: 'Text', text: /^✦ ASTERBRAID/ })).some(x => x.props.color === C.toneColor('night', 'accent'))).toBe(true) // 줄 안의 제목 조각
+  await ui.press({ key: 'palette-theme' })
+  expect((await ui.drawn() as { props?: Record<string, unknown> }).props?.backgroundColor).toBeUndefined()
+  await ui.unmount()
+})
+
+test('6-1 화면 통일: 탭 안 소제목은 모두 같은 구분선, 표 열은 긴 ID를 자르지 않는다', async () => {
+  const long = 'RECURRING-FRONTEND-LONG-ID'
+  const snap = {
+    ...SNAP,
+    tasks: [task({ id: long, state: 'READY_TO_MERGE', branch: 'auto/x', head: 'abc', timeline: [{ state: 'READY', start: '2026-11-24T10:00:00+09:00', end: null }] })],
+    integration_log: [{ time: '2026-11-24T10:01:00+09:00', status: 'MERGED', task: long, message: 'aaaaaaa -> bbbbbbb' }],
+  }
+  const has = (ls: C.Line[]) => ls.map(l => l.map(s => s.text).join('')).some(t => t.includes(`${long} `))
+  expect(has(C.gitLines(snap, 90))).toBe(true)
+  expect(has(C.timelineLines(snap, C.ms('2026-11-24T10:05:00+09:00') ?? 0, 90))).toBe(true)
+  const runs = [run({ agentId: 'z', task: null, status: 'completed' }), run({ agentId: 'y', task: long, status: 'completed' })]
+  const heads = C.agentLines(snap, runs, 0, null, true, 90).filter(l => l[0]?.text.startsWith('── '))
+  expect(heads.length).toBeGreaterThanOrEqual(2) // 끝남·미연결도 구분선으로
+})
+
+test('6-1 설계 문서·설계 검토 결과: 작업을 펼치면 보이고, 문서는 Pane에서 열어 본다(docs/asterbraid 안만)', async ($, on) => {
+  const t = task({
+    id: 'DSN', state: 'READY', notes: ['docs/asterbraid/design/2026-11-26-1000-DSN.md'],
+    design_review: { verdict: 'FAIL', by: 'verifier-dsn', at: '2026-11-26T10:00:00+09:00', notes: '오류 계약이 빠졌다' },
+  })
+  const bad = task({ id: 'BAD', state: 'READY', notes: ['../secret.md'] })
+  engine(on, { ...SNAP, tasks: [t, bad] })
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-tasks' })
+  await ui.press({ key: 'q-DSN' })
+  expect(await ui.find({ type: 'Text', text: /설계 검토 FAIL · verifier-dsn · 오류 계약이 빠졌다/ })).toBeDefined()
+  await ui.press({ key: 'doc-DSN' })
+  expect(await ui.find({ type: 'Text', text: /^계약 본문$/ })).toBeDefined() // 제목과 본문이 별도 줄
+  expect(await ui.find({ type: 'Text', text: /계약 본문/ })).toBeDefined()
+  await ui.press({ key: 'doc-close' })
+  expect(await ui.find({ type: 'Text', text: /계약 본문/ })).toBeUndefined()
+  await ui.press({ key: 'q-BAD' })
+  await ui.press({ key: 'doc-BAD' })
+  expect(await ui.find({ type: 'Text', text: /docs\/asterbraid 밖/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('e2e6 E6-5: 머리말·에이전트 탭의 "실행 미확인"도 1분 유예를 지킨다(경고와 같은 기준)', async () => {
+  const at = Date.parse('2026-11-24T10:00:00+09:00')
+  const snap = { ...SNAP, tasks: [task({ id: 'A', state: 'IMPLEMENTING', updated: '2026-11-24T10:00:00+09:00' })] }
+  const text = (ls: C.Line[]) => ls.map(l => l.map(s => s.text).join('')).join('\n')
+  expect(text(C.headerLines(snap, C.EMPTY_META, [], at + 16_000, [], 90, 1000))).not.toContain('실행 미확인')
+  expect(text(C.agentLines(snap, [], at + 16_000, null))).not.toContain('관측되지 않은')
+  expect(text(C.headerLines(snap, C.EMPTY_META, [], at + 61_000, [], 90, 1000))).toContain('실행 미확인 1')
+})
+
+test('머리말은 사용자 차례를 자리 비움 안내보다 먼저 보여 준다', async () => {
+  const text = (snap: Snapshot) => C.headerLines(snap, C.EMPTY_META, [], 0, [], 120, 1000)
+    .map(l => l.map(s => s.text).join('')).join('\n')
+  const away = text({ ...SNAP, away: { at: '', previews: true, reason: '' } })
+  expect(away.indexOf('▶ 사용자 차례')).toBeLessThan(away.indexOf('☾ 자리 비움 중'))
+  const back = text({ ...SNAP, away: null, away_log: [{ at: '', kind: 'decision', key: 'D-1', text: 'A', reviewed: null }] })
+  expect(back.indexOf('▶ 사용자 차례')).toBeLessThan(back.indexOf('☾ 자리 비운 동안'))
 })
