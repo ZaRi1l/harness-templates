@@ -46,13 +46,22 @@
 | 의존 변경 | `sched deps`(구현 전, 순환 검사), 승인된 미리보기 작업의 `cancel`은 `--force` | e2e3에서 의존을 바꾸려고 취소·재등록하다 미리보기 승인 연결이 끊겼다 |
 | 조사만 하는 작업 | `sched done --close`(노트 필수, 브랜치 있으면 거부) | 1차 e2e에서 진단 작업을 닫을 길이 없어 BLOCKED로 쌓였다 |
 | 정리 미리보기 | `sched cleanup --dry-run` | 자동 모드 분류기가 대상이 안 보이는 정리를 거부했다(2차 e2e). 목록을 먼저 보이면 사람과 분류기가 판단할 수 있다 |
+| 검증자 배정 (2026-11-26) | `start ID --pool verify --agent V`로 제출된 커밋에 필요한 수만큼 배정하고, 배정된 이름의 증거만 센다(`verify_assignment`) | e2e5: 한 verifier가 이름 3개로 증거를 남겨 혼자 "검증 2명"을 채울 수 있었고, 같은 작업에 verifier가 3명 떴다 |
+| 통합만 막는 결정 (2026-11-26) | `decide add --hold merge`(시작·검증은 하고 통합만 대기), `--ask-user`(자리 비움 adopt 거부) | e2e5: 데이터 결정 하나 때문에 구현까지 밤새 멈췄다. 임시 데이터로 할 수 있는 일은 하고 반영만 사람을 기다린다. 사용자가 정한다고 한 저장 방식이 architecture로 분류돼 자동 채택됐다 |
+| 설계 검토 (2026-11-26) | deep 설계는 `next --pool review` → verifier가 `design-review` PASS해야 구현. `review-mode off|deep|ask`(상태에 저장, Mod에서 전환). 건너뛰기는 답한 결정이 있어야 한다 | 큰 작업은 설계가 틀리면 구현 전체를 다시 한다. 상주 부매니저 대신 검토 단계 하나만 더한다 |
+| 노트 폴더 위치 (2026-11-26) | 부른 체크아웃 안 `.asterbraid-tmp/<ID>`(`.git/info/exclude`로 무시) | e2e5: `.git/claude-auto/notes/`는 worktree 밖이라 격리된 implementer의 Write가 거부돼 작업이 멈췄고, manager는 이를 사용자 결정(environment)으로 올렸다 |
+| 배정은 메인 체크아웃에서만 | worktree에서 `sched start`를 거부 | e2e5: RETRY 재개 때 implementer가 직접 `start`해 agent 이름이 worktree id로 남았다 |
+| 기다리기 (2026-11-26) | manager는 할 일이 없으면 차례를 끝낸다. 모든 `next`에 `attention`(RETRY·열린 결정). Mod 머리말에 멈춘 이유 | e2e5: manager가 한 차례 안에서 96분 동안 `next --pool merge`를 491번 불러, 차례가 끝나야 도착하는 FAIL 보고를 65분 몰랐다(manager 캐시 읽기의 64%). 상주 감시 에이전트는 같은 구조라 도움이 안 되고 토큰만 든다 |
+| 가끔 쓰는 절차 | `asterbraid-procedures` 스킬(막힘·중간 인계·끝). manager.md는 원래 크기 안 | 지침은 띄울 때마다 읽혀 토큰이 된다. 핵심 규칙이 빠지지 않는지는 테스트(`TestAgentRules`)가 지킨다 |
+| git 시간 제한 | sched의 git 호출 100초, 잠금을 쥔 동안 git마다 잠금 시각 갱신(두 autonomous 템플릿) | 잠금을 쥔 채 git이 멈추면 120초 뒤 다른 프로세스가 잠금을 치우고 함께 쓴다(외부 검수 지적). PID 생존 확인은 Windows에서 `os.kill(pid, 0)`이 프로세스를 끝내 쓰지 않는다 |
+| 설치 백업 (2026-11-26) | 바꾸기 전 원본을 `.claude/asterbraid.backup/<시각>/`에, 실패하면 되돌리고 `rollback` 제공(최근 3개) | 중간 실패로 새 지침과 옛 sched.py가 섞이면 이상하게 돈다. 하네스를 모르는 사용자도 되돌릴 수 있게 |
 
 ## 공통 코드 정책
 | 파일 | 정책 |
 |---|---|
 | `verify.py` | 모든 템플릿과 같은 파일(테스트가 검사) |
-| `sched.py` | `autonomous-parallel-dev`의 상위 집합. 기존 명령·출력은 유지하고 확장만 한다. 기존 autonomous 테스트를 이 템플릿에 그대로 다시 돌린다 |
-| `integrate.py` | 두 곳만 다르다: 결정 대기 거부, 통합 기록 뒤 스냅샷 갱신(`asterbraid 추가` 주석) |
+| `sched.py` | `autonomous-parallel-dev`의 상위 집합. 기존 명령·출력은 유지하고 확장만 한다. 기존 autonomous 테스트를 이 템플릿에 다시 돌린다(새 관문인 검증자 배정·설계 검토만 끄고) |
+| `integrate.py` | 두 곳만 다르다: 결정 대기 거부(`hold merge` 포함), 통합 기록 뒤 스냅샷 갱신(`asterbraid 추가` 주석) |
 | 엔진 버그 수정 | 두 autonomous 템플릿에 함께 적용하고 각자의 테스트로 확인한다 |
 
 ## 무엇이 어떻게 보장되나

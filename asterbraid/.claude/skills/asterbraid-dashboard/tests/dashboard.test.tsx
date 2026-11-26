@@ -832,3 +832,10 @@ test('승인·결정 탭: 자동으로 정한 것은 최근 3건만 보이고, �
   expect(calls.argv.filter(a => a.includes('away-review')).length).toBe(5)
   await ui.unmount()
 })
+
+test('현황 탭도 긴 작업 ID를 자르지 않고 제목을 줄인다', async () => {
+  const snap = { ...SNAP, tasks: [task({ id: 'RECURRING-FRONTEND', title: '정기 거래 관리 및 표시 UI 구현', state: 'AWAITING_APPROVAL', runnable: false, pool: null })] }
+  const text = C.overviewLines(snap, [], 0, 90).map(l => l.map(s => s.text).join(''))
+  expect(text.some(t => t.includes('RECURRING-FRONTEND '))).toBe(true)
+  expect(text.every(t => C.strWidth(t) <= 90)).toBe(true)
+})

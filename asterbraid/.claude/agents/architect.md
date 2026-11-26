@@ -19,6 +19,7 @@ skills:
 
 ## 순서
 1. 관련 요구(`docs/asterbraid/requirements/`)와 조사(`docs/asterbraid/research/`)의 이 작업 문서, 관련 코드를 읽는다.
+   지시문에 `conventions`(코드 관례)가 있으면 계약을 그 관례(프레임워크, 오류 처리, 이름)에 맞춘다.
 2. 지시문(또는 `sched next --pool design`)의 `design_depth`(light / standard / deep)를 확인한다.
 3. `docs/asterbraid/design/YYYY-MM-DD-HHMM-<작업 ID>.md`를 스킬의 형식으로 쓴다(시각은 `date +%Y-%m-%d-%H%M`). 깊이별 필수 항목을 채우고, deep이면 스킬의 `references/deep-checklist.md`를 읽는다.
    공개 인터페이스는 입력·출력·오류·경계 동작까지 정한다. 여러 작업이 쓰는 계약은 먼저 확정하고, 작업 분할과 `--deps`를 제안한다.

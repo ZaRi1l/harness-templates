@@ -293,7 +293,7 @@ async function openPreview($: EngineInterface, task: string | null, version: num
       why = `${argv[0]} 종료 코드 ${r.exitCode}`
       continue
     }
-    return `${target.label}을(를) 기본 브라우저로 열었다: ${file.realPath}`
+    return `기본 브라우저로 열었다(${target.label}): ${file.realPath}`
   }
   return `브라우저를 열지 못했다(${why}). 직접 연다: ${file.realPath}`
 }

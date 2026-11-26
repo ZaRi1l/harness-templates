@@ -30,7 +30,7 @@ color: purple
   문서로 받은 요구는 복사하지 않고 가리킨다. 대화로 정했으면 보여 주고 확인받는다. 커밋한 뒤 시작한다.
 - 첫머리에 `상태: 진행 중 | 일부 완료(남은 것: …) | 구현 완료 — <통합 커밋>, 보고 <파일>`과 기능별 표(기능, 작업 ID, 상태, 통합 커밋)를 두고,
   통합·보고 때 이것과 `docs/asterbraid/INDEX.md`(문서, 종류, 상태)를 고친다. design 문서는 `상태: 현행 | 대체됨`.
-- AI 문서는 `docs/asterbraid/`의 정해진 폴더에만 쓰게 한다(기존 `docs/`는 읽기만). 지시문마다 `next`의 `map`(지도) 경로를 넣고, 구조가 바뀌면 지도의 그 줄만 고친다.
+- AI 문서는 `docs/asterbraid/`의 정해진 폴더에만 쓰게 한다(기존 `docs/`는 읽기만). 지시문마다 `next`의 `map`(지도), 설계·구현·검증에는 `conventions`(관례)도 넣고, 구조가 바뀌면 지도를 고친다.
 - architect·researcher가 쓴 문서는 `done` 직후 integration에 커밋하고(`docs(asterbraid): …`), 그 경로를 구현 지시문에 넣는다.
 
 ## 작업 등록
@@ -67,16 +67,16 @@ color: purple
 - 구현 지시문: 작업 ID, 담당 경로·완료 기준·문서 경로·지도, 승인된 미리보기(버전·해시), 관련 결정의 응답.
   verifier 지시문: 작업 ID, worktree, head, `start`에 쓴 이름(증거는 이 이름으로만 기록된다), 맡은 관점.
 - 재작업(RETRY)은 `start`로 다시 배정한 뒤 같은 implementer에게 SendMessage로 새 marker와 사유를 보낸다. 없으면 새 implementer가 `sched sync ID`부터.
-- 코드 위치 찾기는 `Explore`에게. "background work/shells"로 안 끝나는 에이전트에게는 띄운 프로세스를 끄라고 한다.
+- 코드 위치 찾기는 `Explore`에게. "background work/shells"로 안 끝나는 에이전트에게는 프로세스를 끄라고 한다.
 - **팀원 종료**: 그 팀원의 작업이 COMPLETED·CANCELLED이고, `deps`로 그 작업에 기대는 작업도 모두 끝났는지 `sched status`로 확인한 뒤 `TaskStop`(팀원 이름).
   verifier는 그 작업의 통합 뒤. 마무리가 필요한 팀원만 먼저 SendMessage로 요청한다.
 
 ## integrate 결과
 MERGED: 끝(의존하던 작업이 풀린다, 요구 문서 상태를 고친다). CONFLICT·FAIL: RETRY가 됐다. 다시 `start`하고 사유와 함께 `sched sync ID`부터 재작업.
-REJECTED: 사유대로(검증 부족 → verifier, 커밋이 바뀜 → 다시 submit, 결정 대기 → 기다림). BUSY: 나중에 다시. BLOCKED: 스킬의 "막힘".
+REJECTED: 사유대로(검증 부족 → verifier, 커밋이 바뀜 → 다시 submit, 결정 대기 → 기다림). BUSY: 나중에. BLOCKED: 스킬의 "막힘".
 
 ## 사용자와 대화
-- 진행 상황은 관제 화면(`/asterbraid`)이 보여 준다. 되풀이하지 않는다(Mod가 없으면 마일스톤마다 요약).
+- 진행은 관제 화면(`/asterbraid`)이 보여 준다. 되풀이하지 않는다(Mod가 없으면 단계마다 요약).
 - 대화에는 요구 확인, 분할 이유, 기술 판단과 근거, 대안, 못 푼 문제, 남은 위험, 결과를 담고 `sched note --kind strategy|decision|tech|split|risk|milestone|blocker --text … [--task ID]`로도 남긴다. 없는 진행률을 지어내지 않는다.
 
 ## 사용자 결정 (결정에 묶인 작업만 멈추고, 나머지는 계속)
@@ -93,7 +93,7 @@ REJECTED: 사유대로(검증 부족 → verifier, 커밋이 바뀜 → 다시 s
    응답은 후속 지시문에 넣는다. 방향이 바뀌면 `decide cancel`, 작업은 새로 등록하거나 취소한다.
 - **자리 비움**(`sched status`에 표시, 사용자가 관제 화면에서 켠다): 결정을 열자마자 `sched decide adopt D-1`(위임된 종류만, 거부되면 둔다),
   `--previews`면 최신 미리보기를 `approve ID --by away`. 사용자 답 없이 할 수 있는 일(미리보기, `--hold merge` 작업의 구현)을 먼저 배정한다.
-- **설계 검토 설정**(`status`·`done` 출력): `ask`면 deep 설계가 끝날 때 "설계 검토를 받을까"를 결정(`direction`, 추천 Y)으로 열고, N이면 `design-review ID --skip --decision D-…`.
+- **설계 검토 설정**(`done` 출력): `ask`면 deep 설계가 끝날 때 "설계 검토를 받을까"를 결정(`direction`, 추천 Y)으로 열고, N이면 `design-review ID --skip --decision D-…`.
 
 ## 끝·중간 인계
 남은 작업이 모두 COMPLETED·BLOCKED·CANCELLED이거나, 남은 일이 사용자 답뿐이면 `asterbraid-procedures`의 "끝·중간 인계"대로 정리하고 보고한다.

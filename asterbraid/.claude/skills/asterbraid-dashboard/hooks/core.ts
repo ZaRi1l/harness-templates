@@ -784,7 +784,8 @@ export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: n
   // 진행 중인 것이 있으면 완료는 한 줄로 접는다(쌓이면 진행 중인 것이 안 보인다)
   const tasks = live.length ? live : sorted
   if (!sorted.length) lines.push([{ text: '등록된 작업이 없다. manager가 sched add로 등록한다', tone: 'dim' }])
-  const titleW = Math.max(8, width - 2 - 9 - 9 - 22)
+  const idW = Math.min(32, Math.max(8, ...tasks.slice(0, 8).map(t => strWidth(t.id)))) // ID는 자르지 않고 제목을 줄인다
+  const titleW = Math.max(8, width - 2 - (idW + 1) - 9 - 22)
   for (const t of tasks.slice(0, 8)) {
     const m = mark(t.state)
     const r = runningRuns(runs).find(x => x.task === t.id)
@@ -800,7 +801,7 @@ export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: n
     const whoTone: Tone = r ? 'accent' : RUNNING_STATES[t.state] || t.state === 'BLOCKED' ? 'warn' : 'dim'
     lines.push([
       { text: `${m.mark} `, tone: m.tone },
-      { text: `${pad(t.id, 8)} `, bold: true },
+      { text: `${pad(t.id, idW)} `, bold: true },
       { text: `${pad(m.label, 8)} `, tone: m.tone },
       { text: `${pad(t.title, titleW)} `, tone: t.state === 'COMPLETED' ? 'dim' : 'plain' },
       { text: who, tone: whoTone },

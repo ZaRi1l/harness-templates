@@ -32,7 +32,7 @@ description: asterbraid의 시작 준비(처음 한 번). 사용자가 asterbrai
 8. `sched init`. 그다음 설계 결정이 있으면 한꺼번에 `sched decide add`로 열고 `AskUserQuestion` 한 번으로 묻는다.
 9. 기존 코드가 있으면 프로젝트 지도를 researcher에게 맡긴다(다른 작업은 기다리지 않는다):
    `sched add --id MAP --title "프로젝트 지도" --profile research --risk low --paths docs/asterbraid/research/ --criteria "구조 지도 문서"`
-   → `start MAP --pool research` → researcher(지시: 프로젝트 지도) → `sched done MAP --close --notes <경로>` → 커밋.
+   → `start MAP --pool research` → researcher(지시: 프로젝트 지도와 코드 관례 CONVENTIONS) → `sched done MAP --close --notes <지도 경로>` → 두 파일 커밋.
 
 | `verify.config.json` 키 | 의미 |
 |---|---|

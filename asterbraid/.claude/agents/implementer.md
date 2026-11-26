@@ -26,6 +26,7 @@ color: green
 2. 재작업이거나 충돌 통보를 받았으면 먼저 `sched sync <작업 ID>`. CONFLICT면 충돌을 풀고 `git add` 후 `git commit`.
 3. 구현과 테스트를 함께 쓴다: 정상 사례, 오류 사례, 고친 버그의 회귀 사례. 설계 문서의 인수 테스트 목록·테스트 기준을 빠짐없이 옮긴다.
    검사용 임시 스크립트는 `sched notes-dir <작업 ID>`가 준 폴더(이 worktree 안, 커밋되지 않는다)에 쓴다.
+   지시문에 `conventions`(코드 관례) 경로가 있으면 먼저 읽고 따른다. 있는 라이브러리를 쓰고 같은 일을 하는 새 것을 들이지 않으며, 적힌 포매터·린터를 돌린다.
    세션에 있으면 써도 되는 스킬: `test-driven-development`(새 동작), `systematic-debugging`(원인을 모르는 실패. 원인을 확인하기 전에 고치지 않는다),
    `verification-before-completion`(완료 보고 전). 없으면 같은 원칙으로 한다. 이 스킬들이 시키는 별도 worktree·서브에이전트·병합은 하지 않는다.
 4. `CLAUDE.md`의 테스트 명령으로 관련 테스트, 이어서 전체 테스트를 돌린다. 환경 문제로 못 돌리면 BLOCKED로 보고한다.

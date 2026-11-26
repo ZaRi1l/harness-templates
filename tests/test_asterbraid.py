@@ -400,6 +400,21 @@ class TestProjectMap(ModsCase):
         (self.repo.path / rel).parent.mkdir(parents=True, exist_ok=True)
         (self.repo.path / rel).write_text("색인이다. 판단은 실제 코드로 한다\n", encoding="utf-8")
         self.assertEqual(self.ok("done", "MAP", "--close", "--notes", rel)["state"], "COMPLETED")
+        # 같은 작업이 코드 관례 문서도 남기면 next가 두 경로를 함께 준다(지시문에 넣는다)
+        self.assertEqual(self.ok("next", "--pool", "implement")["conventions"], None)
+        conv = "docs/asterbraid/research/2026-11-26-0100-CONVENTIONS.md"
+        (self.repo.path / conv).write_text("관례 색인이다. 형식은 설정 파일을 따른다\n", encoding="utf-8")
+        nxt = self.ok("next", "--pool", "implement")
+        self.assertEqual((nxt["map"], nxt["conventions"]), (rel, conv))
+
+    def test_conventions_rules_reach_the_agents_that_write_code(self):
+        claude = Path(base.__file__).resolve().parent.parent / MODS / ".claude"
+        text = lambda rel: (claude / rel).read_text(encoding="utf-8")
+        self.assertIn("CONVENTIONS.md", text("agents/researcher.md"))
+        self.assertIn("CONVENTIONS", text("skills/asterbraid-bootstrap/SKILL.md"))
+        for agent in ("implementer", "verifier", "architect"):
+            self.assertIn("`conventions`", text(f"agents/{agent}.md"), agent)
+        self.assertIn("`conventions`", text("agents/manager.md"))
 
 
 class TestTaskTiming(ModsCase):
@@ -943,6 +958,8 @@ class TestNotesDirInWorktree(ModsCase):
         wt = self.worktree("A", {"src/a.py": "A = 1\n"})
         d = Path(self.ok("notes-dir", "A", cwd=wt)["notes_dir"])
         self.assertTrue(os.path.samefile(d.parent.parent, wt))
+        allow = json.loads((self.repo.path / ".claude/settings.json").read_text(encoding="utf-8"))["permissions"]["allow"]
+        self.assertIn("Edit(**/.asterbraid-tmp/**)", allow)  # 밤새 돌 때 쓰기 승인 창에서 멈추지 않게(Edit 규칙은 Write에도 적용)
         (d / "check.py").write_text("print(1)\n", encoding="utf-8")
         self.assertEqual(self.repo.git("status", "--porcelain", cwd=wt), "")  # 커밋 대상이 아니다
         main = Path(self.ok("notes-dir", "A")["notes_dir"])
@@ -1042,6 +1059,14 @@ class TestAgentRules(unittest.TestCase):
         self.assertIn("TaskStop", m.split("---", 2)[1])  # tools에 있어야 쓸 수 있다
         self.assertLessEqual(len(m.splitlines()), 109)
         self.assertLessEqual(len(m.replace("\r\n", "\n").encode("utf-8")) + len(m.splitlines()), 11971)  # CRLF 기준
+
+    def test_shared_rules_within_budget(self):
+        """asterbraid.md는 모든 에이전트가 매번 읽는다(2026-11-26 크기가 상한). 늘리려면 다른 줄을 줄인다."""
+        r = self.text("asterbraid.md")
+        self.assertLessEqual(len(r.splitlines()), 61)
+        self.assertLessEqual(len(r.replace("\r\n", "\n").encode("utf-8")) + len(r.splitlines()), 6474)  # CRLF 기준
+        for phrase in ("git push는 하지 않는다", "우회하지 않는다", "`sched notes-dir ID`", "하네스 문제로 보고한다"):
+            self.assertIn(phrase, r)
 
     def test_procedures_skill_has_sections_manager_names(self):
         p = self.text("skills/asterbraid-procedures/SKILL.md")
