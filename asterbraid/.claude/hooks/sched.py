@@ -69,6 +69,8 @@ DEFAULT_CONFIG = {
         "deep": {"research": True, "design": True, "verifiers": 2},
     },
     "integration_lock_stale_s": 7200,
+    "verify_assignment": True,  # asterbraid 추가(e2e5): `start --pool verify`로 배정된 verifier의 증거만 센다
+    "design_review": "deep",  # asterbraid 추가(5-19): off | deep(deep 설계는 검토 PASS 뒤 구현) | ask(deep마다 사용자에게 묻는다)
 }
 RISKS = ("low", "medium", "high")
 TRANSITIONS = {
@@ -97,6 +99,10 @@ DECISION_KINDS = ("ui", "ux", "architecture", "data", "breaking", "dependency", 
                   "environment", "limit", "other")
 # asterbraid 추가(4-5): 자리 비움 중 추천안으로 정해도 되는 결정 종류. 의존성·호환 깨짐·환경·데이터·한도는 사람이 정한다
 ADOPTABLE_KINDS = ("ui", "ux", "direction", "architecture", "requirements")
+REVIEW_MODES = ("off", "deep", "ask")
+HOLDS = ("start", "merge")  # 결정이 막는 단계: start(시작·통합 모두) / merge(통합만, 구현·테스트는 진행)
+TMP_DIR = ".asterbraid-tmp"  # notes-dir: 체크아웃마다 두는 임시 폴더(git이 무시)
+GIT_TIMEOUT_S = 60  # 상태 잠금을 오래된 것으로 보는 120초보다 짧게. git이 멈춰도 잠금을 쥔 채 기다리지 않는다
 NOTE_KINDS = ("strategy", "priority", "decision", "tech", "alternative", "split", "risk", "resolved", "milestone",
               "blocker", "plan")
 SNAPSHOT_SCHEMA = 1
@@ -115,9 +121,18 @@ def now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+HELD_LOCKS: set = set()  # 이 프로세스가 쥔 잠금. git을 부를 때마다 갱신해 오래된 잠금으로 치워지지 않게 한다
+
+
 def run_git(cwd: Path, *args: str) -> tuple[int, str]:
-    p = subprocess.run([verify.GIT, "-C", str(cwd), *args], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+    for lock in HELD_LOCKS:
+        with contextlib.suppress(OSError):
+            os.utime(str(lock))
+    try:
+        p = subprocess.run([verify.GIT, "-C", str(cwd), *args], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise Refused(f"git {' '.join(args)}이(가) {GIT_TIMEOUT_S}초 시간 제한을 넘었다. 다른 git 작업·잠긴 파일을 확인하고 다시 실행한다")
     return p.returncode, (p.stdout if p.returncode == 0 else p.stdout + p.stderr).strip()
 
 
@@ -166,6 +181,7 @@ class FileLock:
                 fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.write(fd, f"{os.getpid()} {now()}".encode())
                 os.close(fd)
+                HELD_LOCKS.add(self.path)
                 return
             except (FileExistsError, PermissionError):  # Windows는 지워지는 중인 파일에 PermissionError를 낸다
                 try:
@@ -179,6 +195,7 @@ class FileLock:
                 time.sleep(0.05)
 
     def release(self) -> None:
+        HELD_LOCKS.discard(self.path)
         with contextlib.suppress(OSError):
             os.unlink(str(self.path))
 
@@ -280,8 +297,22 @@ def transition(t: dict, new: str, reason: str = "", force: bool = False, **field
 def needs(cfg: dict, t: dict) -> tuple[bool, bool, bool]:
     """아직 남은 사전 단계: (조사, 설계, 미리보기 승인). 이 순서로 진행한다."""
     prof = cfg["profiles"][t["profile"]]
-    return (prof["research"] and not t["researched"], (prof["design"] or bool(t.get("design_depth"))) and not t["designed"],
+    return (prof["research"] and not t["researched"],
+            ((prof["design"] or bool(t.get("design_depth"))) and not t["designed"]) or review_pending(t),
             t["preview"]["required"] and t["preview"]["approved"] is None)
+
+
+def review_pending(t: dict) -> bool:
+    """asterbraid 추가(5-19): 설계는 끝났지만 설계 검토 PASS(또는 사용자가 정한 건너뛰기)를 아직 못 받았다."""
+    return (bool(t.get("review_needed")) and t["designed"]
+            and (t.get("design_review") or {}).get("verdict") not in ("PASS", "SKIP"))
+
+
+def review_mode(st: dict, cfg: dict) -> str:
+    mode = st.get("design_review") or cfg["design_review"]
+    if mode not in REVIEW_MODES:
+        raise Refused(f"design_review는 {REVIEW_MODES} 중 하나다: {mode}")
+    return mode
 
 
 def approved_preview(t: dict) -> dict | None:
@@ -338,13 +369,16 @@ def waiting_deps(st: dict, t: dict) -> list:
     return [d for d in t["deps"] if st["tasks"][d]["state"] != "COMPLETED"]
 
 
-def open_decisions(st: dict, t: dict) -> list:
-    return sorted(d["id"] for d in st.get("decisions", {}).values() if d["state"] == "OPEN" and t["id"] in d["tasks"])
+def open_decisions(st: dict, t: dict, stage: str = "merge") -> list:
+    """이 작업에 걸린 열린 결정. stage="start"면 통합만 막는 결정(hold=merge)은 뺀다."""
+    return sorted(d["id"] for d in st.get("decisions", {}).values() if d["state"] == "OPEN" and t["id"] in d["tasks"]
+                  and (stage == "merge" or d.get("hold", "start") == "start"))
 
 
-def hold_reason(st: dict, t: dict) -> str | None:
-    """사용자 결정이 이 작업에 걸려 있으면 그 사유. 결정과 무관한 작업은 계속 진행한다."""
-    ids = open_decisions(st, t)
+def hold_reason(st: dict, t: dict, stage: str = "start") -> str | None:
+    """사용자 결정이 이 작업에 걸려 있으면 그 사유. 결정과 무관한 작업은 계속 진행한다.
+    hold=merge 결정은 시작·구현·검증은 두고 통합만 막는다(asterbraid 추가, e2e5)."""
+    ids = open_decisions(st, t, stage)
     return f"사용자 결정 대기: {ids}" if ids else None
 
 
@@ -490,10 +524,12 @@ def dispatchable(st: dict, cfg: dict, pool: str) -> tuple[list, list]:
     tasks = sorted(st["tasks"].values(), key=lambda t: (-t["priority"], t["created"], t["id"]))
     if pool == "merge":
         ready = [t for t in tasks if t["state"] == "READY_TO_MERGE"]
-        return [t for t in ready if not hold_reason(st, t)], \
-            [{"id": t["id"], "why": hold_reason(st, t)} for t in ready if hold_reason(st, t)]
+        return [t for t in ready if not hold_reason(st, t, "merge")], \
+            [{"id": t["id"], "why": hold_reason(st, t, "merge")} for t in ready if hold_reason(st, t, "merge")]
     if pool == "approval":
         return [t for t in tasks if t["state"] == "AWAITING_APPROVAL"], []
+    if pool == "review":  # asterbraid 추가(5-19): 설계 검토를 기다리는 작업(슬롯 없음, verifier가 맡는다)
+        return [t for t in tasks if t["state"] == "PENDING" and review_pending(t)], []
     if pool == "verify":
         need = [t for t in tasks if t["state"] == "VERIFYING"]
         return need[: limit(st, cfg, "verify")], [{"id": t["id"], "why": "검증 슬롯 없음"}
@@ -504,7 +540,7 @@ def dispatchable(st: dict, cfg: dict, pool: str) -> tuple[list, list]:
         if pool == "research":
             ok, why = t["state"] == "PENDING" and need_r, None
         elif pool == "design":
-            ok, why = t["state"] == "PENDING" and need_d and not need_r, None
+            ok, why = t["state"] == "PENDING" and need_d and not need_r and not t["designed"], None
         elif pool == "preview":
             ok, why = t["state"] == "PENDING" and need_p and not need_r and not need_d, None
         else:
@@ -529,15 +565,43 @@ def brief(t: dict) -> dict:
                               "branch", "worktree", "head", "retries", "reason", "notes", "preview")}
 
 
+def assigned_verifiers(t: dict) -> list:
+    """지금 제출된 커밋에 배정된 verifier 이름(바꿔 띄운 것은 뺀다)."""
+    return [v["agent"] for v in t.get("verifiers", []) if v["sha"] == t.get("head") and not v.get("replaced")]
+
+
+def attention(st: dict) -> list:
+    """asterbraid 추가(e2e5 E5-1): 어느 풀을 물어도 놓치면 안 되는 것(재작업, 사용자 결정)을 함께 보인다."""
+    out = [{"id": t["id"], "state": t["state"], "why": t["reason"]}
+           for t in sorted(st["tasks"].values(), key=lambda t: t["id"]) if t["state"] == "RETRY"]
+    for d in sorted(st["decisions"].values(), key=lambda x: x["created"]):
+        if d["state"] == "OPEN":
+            out.append({"id": d["id"], "state": "DECISION", "why": f"사용자 결정 대기 {d['id']}: {d['title']} "
+                                                                   f"(작업 {','.join(d['tasks']) or '없음'})"})
+    return out
+
+
+def project_map(root: Path) -> str | None:
+    """asterbraid 추가(E5-9): 최신 프로젝트 지도 경로. 지시문에 넣는다."""
+    maps = sorted((root / "docs" / "asterbraid" / "research").glob("*MAP*.md"))
+    return maps[-1].relative_to(root).as_posix() if maps else None
+
+
 def cmd_next(a, root, cfg):
     with store(root, write=False) as st:
         picks, waiting = dispatchable(st, cfg, a.pool)
-        out = {"pool": a.pool, "dispatch": [{**brief(t), "design_depth": t.get("design_depth")} for t in picks], "waiting": waiting}
+        out = {"pool": a.pool, "dispatch": [{**brief(t), "design_depth": t.get("design_depth")} for t in picks],
+               "waiting": waiting, "attention": attention(st), "map": project_map(root)}
         if a.pool in SLOT_STATE:
             out["free_slots"] = limit(st, cfg, a.pool) - used(st, a.pool)
         if a.pool == "verify":
             for item, t in zip(out["dispatch"], picks):
-                item["verifiers_needed"] = required_verifiers(cfg, t) - len(valid_evidence(t))
+                busy = [v for v in assigned_verifiers(t) if v not in {e["verifier"] for e in valid_evidence(t)}]
+                item["verifiers_needed"] = max(0, required_verifiers(cfg, t) - len(valid_evidence(t)) - len(busy))
+                item["verifiers_assigned"] = assigned_verifiers(t)
+        if a.pool == "review":
+            for item, t in zip(out["dispatch"], picks):
+                item["marker"] = marker(t["id"], "review", t.get("design_rounds", 0) + 1)
         return out
 
 
@@ -546,6 +610,11 @@ def cmd_start(a, root, cfg):
         t = get(st, a.id)
         if not st["integration_branch"]:
             raise Refused("먼저 `sched.py init`으로 통합 브랜치를 기록한다")
+        here = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
+        if not verify.same_path(here, root):  # asterbraid 추가(e2e5 E5-5): 배정은 manager가 메인 체크아웃에서 한다
+            raise Refused("start는 메인 체크아웃에서 manager가 한다. 작업 worktree에서는 배정하지 않는다(재작업이면 manager에게 보고)")
+        if a.pool == "verify":
+            return start_verify(st, cfg, t, a)
         if st.get("paused"):
             raise Refused(f"새 배정이 일시 중지됐다({st['paused'].get('reason') or '사유 없음'}). `sched resume`으로 다시 시작한다")
         held = hold_reason(st, t)
@@ -559,7 +628,7 @@ def cmd_start(a, root, cfg):
                 raise Refused(f"{t['id']}는 조사 단계가 필요 없거나 이미 끝났다")
             transition(t, "RESEARCHING", agent=a.agent)
         elif a.pool == "design":
-            if need_r or not need_d:
+            if need_r or not need_d or t["designed"]:
                 raise Refused(f"{t['id']}는 지금 설계 단계가 아니다(조사 먼저이거나 설계가 필요 없다)")
             transition(t, "DESIGNING", agent=a.agent)
         elif a.pool == "preview":
@@ -582,6 +651,27 @@ def cmd_start(a, root, cfg):
         t["attempts"] = t.get("attempts", 0) + 1
         t["history"][-1].update(pool=a.pool, attempt=t["attempts"])
         return {**brief(t), "attempt": t["attempts"], "marker": marker(t["id"], a.pool, t["attempts"])}
+
+
+def start_verify(st: dict, cfg: dict, t: dict, a) -> dict:
+    """asterbraid 추가(e2e5 E5-2·E5-6·5-16): verifier를 제출된 커밋에 배정한다. 필요한 수보다 더 띄우지 않는다."""
+    if t["state"] not in ("VERIFYING", "READY_TO_MERGE"):
+        raise Refused(f"{t['id']}는 {t['state']} 상태다. 검증은 VERIFYING(제출 뒤)일 때 배정한다")
+    t.setdefault("verifiers", [])
+    if a.replace:
+        old = [v for v in t["verifiers"] if v["sha"] == t["head"] and v["agent"] == a.replace and not v.get("replaced")]
+        if not old:
+            raise Refused(f"바꿀 verifier가 이 커밋에 배정돼 있지 않다: {a.replace}")
+        old[0]["replaced"] = a.agent
+    names = assigned_verifiers(t)
+    if a.agent in names:
+        raise Refused(f"{a.agent}는 이미 {t['id']}에 배정됐다")
+    if len(names) >= required_verifiers(cfg, t):
+        raise Refused(f"{t['id']}에는 이미 verifier {len(names)}명({names})이 배정됐다(필요 {required_verifiers(cfg, t)}). "
+                      "멈춘 verifier를 바꾸려면 --replace 이전이름")
+    t["verifiers"].append({"agent": a.agent, "sha": t["head"], "at": now()})
+    return {**brief(t), "attempt": t["attempts"], "marker": marker(t["id"], "verify", t["attempts"]),
+            "verifiers_assigned": assigned_verifiers(t), "required": required_verifiers(cfg, t)}
 
 
 def marker(task_id: str, pool: str, attempt: int) -> str:
@@ -613,12 +703,59 @@ def cmd_done(a, root, cfg):
             t["researched"] = True
         elif t["state"] == "DESIGNING":
             t["designed"] = True
+            mode = review_mode(st, cfg)
+            t["review_needed"] = mode != "off" and t.get("design_depth") == "deep"
+            t["design_review"] = None
         else:
             raise Refused(f"{t['id']}는 조사·설계 중이 아니다({t['state']})")
         if a.notes:
             t["notes"].append(a.notes)
         transition(t, "PENDING" if any(needs(cfg, t)) else "READY", "단계 완료")
+        out = brief(t)
+        if review_pending(t):
+            out["next"] = ("설계 검토가 필요하다: `sched next --pool review` → verifier(설계 검토)"
+                           + (". 설정이 ask다: 먼저 사용자에게 설계 검토를 받을지 결정으로 묻는다" if mode == "ask" else ""))
+        return out
+
+
+def cmd_design_review(a, root, cfg):
+    """asterbraid 추가(5-19): 설계 검토 판정. FAIL이면 설계로 돌아가고, --skip은 사용자가 답한 결정이 있어야 한다."""
+    with store(root) as st:
+        t = get(st, a.id)
+        if t["state"] != "PENDING" or not review_pending(t):
+            raise Refused(f"{t['id']}는 설계 검토를 기다리는 작업이 아니다({t['state']})")
+        if a.skip:
+            d = st["decisions"].get(a.decision or "")
+            if not d or d["state"] != "ANSWERED" or t["id"] not in d["tasks"]:
+                raise Refused(f"설계 검토를 건너뛰려면 이 작업에 묶인 답한 결정(--decision)이 필요하다: {a.decision or '없음'}")
+            t["design_review"] = {"verdict": "SKIP", "by": d.get("by"), "decision": d["id"], "at": now(), "notes": a.notes}
+        else:
+            if not a.verifier or a.verdict not in ("PASS", "FAIL"):
+                raise Refused("--verifier 이름과 --verdict PASS|FAIL을 준다(건너뛰기는 --skip --decision ID)")
+            t["design_review"] = {"verdict": a.verdict, "by": a.verifier, "at": now(), "notes": a.notes}
+            t.setdefault("design_reviews", []).append(t["design_review"])
+            if a.verdict == "FAIL":
+                t["design_rounds"] = t.get("design_rounds", 0) + 1
+                t["designed"] = False
+                if t["design_rounds"] > cfg["max_retries"]:
+                    transition(t, "BLOCKED", f"설계 검토 FAIL이 한도({cfg['max_retries']})를 넘었다: {a.notes}")
+                    return brief(t)
+                t["history"].append({"at": now(), "from": "PENDING", "to": "PENDING", "kind": "design_fail",
+                                     "reason": f"설계 검토 FAIL({a.verifier}): {a.notes}"})
+                t["reason"] = f"설계 검토 FAIL: {a.notes}"
+                return brief(t)
+        why = f"설계 검토 {t['design_review']['verdict']}"
+        if any(needs(cfg, t)):  # 미리보기가 남았으면 PENDING 그대로
+            t["history"].append({"at": now(), "from": "PENDING", "to": "PENDING", "reason": why})
+        else:
+            transition(t, "READY", why)
         return brief(t)
+
+
+def cmd_review_mode(a, root, cfg):
+    with store(root) as st:
+        st["design_review"] = a.mode
+        return {"design_review": a.mode}
 
 
 def preview_dir(root: Path) -> Path:
@@ -784,6 +921,9 @@ def cmd_evidence(a, root, cfg):
         if sha != t["head"] or actual != t["head"]:
             raise Refused(f"검증한 커밋 {sha[:10]}이 제출된 커밋 {str(t['head'])[:10]}(브랜치 현재 "
                           f"{str(actual)[:10]})과 다르다. 제출 뒤 브랜치가 바뀌었으면 다시 submit해야 한다")
+        if cfg["verify_assignment"] and a.verifier not in assigned_verifiers(t):
+            raise Refused(f"{a.verifier}는 이 커밋({sha[:10]})에 배정된 verifier가 아니다(배정: {assigned_verifiers(t)}). "
+                          "manager가 `sched start ID --pool verify --agent 이름`으로 배정한 이름으로만 기록한다")
         t["evidence"].append({"at": now(), "verifier": a.verifier, "verdict": a.verdict, "sha": sha,
                               "scope": a.scope, "notes": a.notes, "criteria": criteria_version(t)})
         if a.verdict == "FAIL":
@@ -1102,7 +1242,7 @@ def snapshot(root: Path, cfg: dict, st: dict) -> dict:
     integ = st["integration_branch"]
     head = branch_head(root, integ) if integ else None
     place = {}  # 작업 ID → (풀, 바로 시작 가능, 기다리는 이유)
-    for pool in ("research", "design", "preview", "implement", "merge"):
+    for pool in ("research", "design", "review", "preview", "implement", "merge"):
         picks, waiting = dispatchable(st, cfg, pool)
         for t in picks:
             place[t["id"]] = (pool, True, None)
@@ -1119,7 +1259,9 @@ def snapshot(root: Path, cfg: dict, st: dict) -> dict:
         tasks.append({
             **{k: t.get(k) for k in ("id", "title", "state", "priority", "risk", "profile", "paths", "forbid", "deps",
                                      "criteria", "agent", "attempts", "branch", "worktree", "base", "head", "retries",
-                                     "reason", "notes", "created", "updated", "completed", "cleaned", "design_depth")},
+                                     "reason", "notes", "created", "updated", "completed", "cleaned", "design_depth",
+                                     "design_review")},
+            "review_pending": review_pending(t), "verifiers_assigned": assigned_verifiers(t),
             "pool": pool, "runnable": runnable, "waiting": why, "decisions_open": open_decisions(st, t),
             "started": next((h["at"] for h in t["history"] if h.get("pool")), None),  # 첫 배정(걸린 시간 계산용)
             "evidence": {"valid": len(valid_evidence(t)) if verifying else None,
@@ -1136,6 +1278,7 @@ def snapshot(root: Path, cfg: dict, st: dict) -> dict:
         "project": {"root": str(root), "name": root.name, "state_dir": str(d)},
         "integration": {"branch": integ, "head": head},
         "paused": st.get("paused"), "away": st.get("away"), "away_log": st.get("away_log", [])[-30:],
+        "design_review_mode": st.get("design_review") or cfg["design_review"],
         "total": len(tasks), "completed": counts.get("COMPLETED", 0), "counts": counts,
         "slots": {**{p: {"used": used(st, p), "limit": limit(st, cfg, p)} for p in SLOT_STATE},
                   "verify": {"queued": counts.get("VERIFYING", 0), "limit": limit(st, cfg, "verify")}},
@@ -1198,8 +1341,13 @@ def cmd_decide(a, root, cfg):
                 "options": [{"key": k, "label": v, "pros": pros.get(k, ""), "cons": cons.get(k, "")}
                             for k, v in labels.items()],
                 "recommend": a.recommend or None, "why": a.why, "evidence": [x for x in (a.evidence or "").split(",") if x],
-                "state": "OPEN", "created": now(), "choice": None, "note": None, "by": None, "answered_at": None}
-            return decisions[a.id]
+                "state": "OPEN", "created": now(), "choice": None, "note": None, "by": None, "answered_at": None,
+                "hold": a.hold, "ask_user": a.ask_user}
+            done = [x for x in tasks if st["tasks"][x]["state"] in ("COMPLETED", "MERGING")]
+            out = dict(decisions[a.id])
+            if done:  # e2e5 5-13: 결정을 늦게 열어 이미 통합된 작업은 이 결정이 막지 못한다
+                out["warning"] = f"이미 통합됐거나 통합 중인 작업이 있다: {done}. 답에 따라 후속 작업으로 고친다"
+            return out
         d = decisions.get(a.id)
         if d is None:
             raise Refused(f"결정이 없다: {a.id}")
@@ -1208,6 +1356,8 @@ def cmd_decide(a, root, cfg):
         if a.action == "adopt":  # asterbraid 추가(4-5): 자리 비움 중 추천안 채택
             if not st["away"]:
                 raise Refused("자리 비움 중이 아니다. 사용자가 답할 때까지 기다린다")
+            if d.get("ask_user"):
+                raise Refused("사용자가 직접 정한다고 한 결정이다(--ask-user). 사용자가 돌아오면 묻는다")
             if d["kind"] not in ADOPTABLE_KINDS:
                 raise Refused(f"{d['kind']} 결정은 위임 범위가 아니다(위임: {', '.join(ADOPTABLE_KINDS)}). 사용자가 돌아오면 묻는다")
             if not d["recommend"]:
@@ -1265,6 +1415,7 @@ def cmd_away_review(a, root, cfg):
         live = [x for x in old["tasks"] if st["tasks"].get(x, {}).get("state") not in ("COMPLETED", "CANCELLED")]
         st["decisions"][new_id] = {
             **{k: old[k] for k in ("title", "question", "kind", "options", "recommend", "evidence")},
+            "hold": old.get("hold", "start"), "ask_user": old.get("ask_user", False),
             "id": new_id, "tasks": live, "why": f"자리 비운 동안 {old['choice']}로 정했다. 사용자가 다시 정한다",
             "state": "OPEN", "created": now(), "choice": None, "note": None, "by": None, "answered_at": None,
             "redo_of": a.key}
@@ -1312,11 +1463,20 @@ def cmd_limit(a, root, cfg):
 
 
 def cmd_notes_dir(a, root, cfg):
+    """asterbraid 변경(e2e5 5-12): 부른 체크아웃 안의 `.asterbraid-tmp/ID`. worktree 격리 에이전트도 쓸 수 있고,
+    git이 무시하게(info/exclude) 해 두어 커밋·제출·정리를 막지 않는다."""
     with store(root, write=False) as st:
         get(st, a.id)
-    d = state_dir(root) / "notes" / a.id
+    here = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
+    exclude = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    text = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+    if TMP_DIR + "/" not in text.splitlines():
+        with exclude.open("a", encoding="utf-8") as fh:
+            fh.write(("" if text.endswith("\n") or not text else "\n") + TMP_DIR + "/\n")
+    d = here / TMP_DIR / a.id
     d.mkdir(parents=True, exist_ok=True)
-    return {"notes_dir": str(d)}
+    return {"notes_dir": str(d), "note": "실험·검사용 임시 파일 자리다(커밋되지 않는다). 남길 결과는 docs/asterbraid/에 쓴다"}
 
 
 def main() -> int:
@@ -1339,10 +1499,15 @@ def main() -> int:
         (("--needs-research",), {"action": "store_true"}), (("--preview",), {"action": "store_true"}),
         (("--needs-design",), {"nargs": "?", "const": "standard", "default": None, "choices": DESIGN_DEPTHS}))
     cmd("load", cmd_load, (("file",), {}))
-    cmd("next", cmd_next, (("--pool",), {"required": True, "choices": ["research", "design", "preview", "approval", "implement", "verify", "merge"]}))
-    cmd("start", cmd_start, ID, (("--pool",), {"required": True, "choices": list(SLOT_STATE)}),
-        (("--agent",), {"required": True}))
+    cmd("next", cmd_next, (("--pool",), {"required": True, "choices": ["research", "design", "review", "preview", "approval",
+                                                                       "implement", "verify", "merge"]}))
+    cmd("start", cmd_start, ID, (("--pool",), {"required": True, "choices": list(SLOT_STATE) + ["verify"]}),
+        (("--agent",), {"required": True}), (("--replace",), {"default": ""}))
     cmd("done", cmd_done, ID, (("--notes",), {"default": ""}), (("--close",), {"action": "store_true"}))
+    cmd("design-review", cmd_design_review, ID, (("--verifier",), {"default": ""}),
+        (("--verdict",), {"default": "", "choices": ["", "PASS", "FAIL"]}), (("--notes",), {"default": ""}),
+        (("--skip",), {"action": "store_true"}), (("--decision",), {"default": ""}))
+    cmd("review-mode", cmd_review_mode, (("mode",), {"choices": REVIEW_MODES}))
     cmd("preview", cmd_preview, ID, (("--file",), {"required": True}), (("--summary",), {"default": ""}))
     BY = (("--by",), {"default": "user"})  # 누가 기록했나: user(manager가 사용자 답을 옮김) / cli / tui
     cmd("approve", cmd_approve, ID, (("--version",), {"type": int, "default": 0}), (("--sha",), {"default": ""}), BY)
@@ -1355,7 +1520,8 @@ def main() -> int:
         (("--title",), {"default": ""}), (("--question",), {"default": ""}), (("--kind",), {"default": "other"}),
         (("--tasks",), {"default": ""}), (("--option",), {"action": "append"}), (("--pros",), {"action": "append"}),
         (("--cons",), {"action": "append"}), (("--recommend",), {"default": ""}), (("--why",), {"default": ""}),
-        (("--evidence",), {"default": ""}), (("--choice",), {"default": ""}), (("--note",), {"default": ""}), REASON, BY)
+        (("--evidence",), {"default": ""}), (("--choice",), {"default": ""}), (("--note",), {"default": ""}), REASON, BY,
+        (("--hold",), {"default": "start", "choices": HOLDS}), (("--ask-user",), {"action": "store_true"}))
     cmd("pause", cmd_pause, REASON)
     cmd("resume", cmd_resume)
     cmd("away", cmd_away, (("--previews",), {"action": "store_true"}), REASON)

@@ -14,16 +14,42 @@ import test_autonomous as base
 MODS = "asterbraid"
 
 
+def legacy_gates_off(case):
+    """옛 autonomous 테스트는 검증자 배정·설계 검증 없이 쓴다. 그 두 관문만 끄고 나머지 규칙은 그대로 돌린다."""
+    p = case.repo.path / ".claude/hooks/auto.config.json"
+    data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    data.update(verify_assignment=False, design_review="off")
+    p.write_text(json.dumps(data), encoding="utf-8")
+    case.repo.git("commit", "-qam", "test: 옛 관문 끔")  # 메인 체크아웃이 깨끗해야 통합한다
+
+
 class TestSchedulerRegression(base.TestScheduler):
     template = MODS
+
+    def setUp(self):
+        super().setUp()
+        legacy_gates_off(self)
 
 
 class TestIntegrationRegression(base.TestIntegration):
     template = MODS
 
+    def setUp(self):
+        super().setUp()
+        legacy_gates_off(self)
+
 
 class ModsCase(base.AutoCase):
     template = MODS
+
+    def ready_to_merge(self, tid, files=None, paths=base.PATHS, **kw):
+        self.add(tid, paths=paths, **kw)
+        self.ok("start", tid, "--pool", "implement", "--agent", "impl")
+        wt = self.worktree(tid, files or {"src/a.py": f"A = '{tid}'\n"})
+        self.ok("submit", tid, cwd=wt)
+        self.ok("start", tid, "--pool", "verify", "--agent", "v1")
+        self.ok("evidence", tid, "--verifier", "v1", "--verdict", "PASS", "--sha", self.repo.git("rev-parse", "HEAD", cwd=wt))
+        return wt
 
     def snapshot(self):
         path = Path(self.ok("snapshot")["snapshot"])
@@ -731,6 +757,192 @@ class TestInstaller(unittest.TestCase):
     def test_refuses_template_itself(self):
         self.assertNotEqual(self.run_tool("install", str(self.TEMPLATE)).returncode, 0)
         self.assertNotEqual(self.run_tool("update", str(self.target)).returncode, 0)  # 설치 전
+
+
+class TestVerifierAssignment(ModsCase):
+    """e2e5 E5-2·5-16·E5-6: 한 verifier가 이름을 바꿔 검증 2명을 채웠고, 같은 작업에 verifier가 3명 떴다."""
+
+    def submitted(self, tid="A", **kw):
+        self.add(tid, **kw)
+        self.ok("start", tid, "--pool", "implement", "--agent", "impl")
+        wt = self.worktree(tid, {"src/a.py": "A = 1\n"})
+        self.ok("submit", tid, cwd=wt)
+        return self.repo.git("rev-parse", "HEAD", cwd=wt)
+
+    def test_only_assigned_verifiers_count(self):
+        sha = self.submitted(risk="high", profile="standard")  # verifier 2명
+        self.assertEqual(self.ok("next", "--pool", "verify")["dispatch"][0]["verifiers_needed"], 2)
+        out = self.ok("start", "A", "--pool", "verify", "--agent", "v1")
+        self.assertEqual(out["marker"], "[auto-task id=A pool=verify attempt=1]")
+        self.assertEqual(self.ok("next", "--pool", "verify")["dispatch"][0]["verifiers_needed"], 1)  # 배정된 만큼 줄어든다
+        self.assertIn("배정", self.refused("evidence", "A", "--verifier", "v2", "--verdict", "PASS", "--sha", sha))
+        self.ok("evidence", "A", "--verifier", "v1", "--verdict", "PASS", "--sha", sha)
+        self.ok("start", "A", "--pool", "verify", "--agent", "v2")
+        self.assertIn("이미", self.refused("start", "A", "--pool", "verify", "--agent", "v3"))  # 필요한 수를 넘겨 띄우지 않는다
+        self.ok("start", "A", "--pool", "verify", "--agent", "v3", "--replace", "v2")  # 멈춘 verifier는 바꿔 띄운다
+        self.assertIn("배정", self.refused("evidence", "A", "--verifier", "v2", "--verdict", "PASS", "--sha", sha))
+        self.assertEqual(self.ok("evidence", "A", "--verifier", "v3", "--verdict", "PASS", "--sha", sha)["state"],
+                         "READY_TO_MERGE")
+
+    def test_verify_start_needs_verifying_state(self):
+        self.add("A")
+        self.assertIn("VERIFYING", self.refused("start", "A", "--pool", "verify", "--agent", "v1"))
+
+    def test_resubmit_needs_new_assignment(self):
+        sha = self.submitted()
+        self.ok("start", "A", "--pool", "verify", "--agent", "v1")
+        self.ok("evidence", "A", "--verifier", "v1", "--verdict", "FAIL", "--sha", sha, "--notes", "결함")
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+        wt = self.tmp / "wt-A"
+        self.commit(wt, {"src/a.py": "A = 2\n"}, "fix")
+        self.ok("submit", "A", cwd=wt)
+        sha2 = self.repo.git("rev-parse", "HEAD", cwd=wt)
+        self.assertIn("배정", self.refused("evidence", "A", "--verifier", "v1", "--verdict", "PASS", "--sha", sha2))
+        self.assertEqual(self.ok("start", "A", "--pool", "verify", "--agent", "v1")["marker"],
+                         "[auto-task id=A pool=verify attempt=2]")
+
+
+class TestStartOnlyFromMain(ModsCase):
+    """e2e5 E5-5: RETRY 재개 때 implementer가 worktree에서 직접 `sched start`를 했다. 배정은 manager만 한다."""
+
+    def test_start_from_worktree_is_refused(self):
+        self.add("A")
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+        wt = self.worktree("A", {"src/a.py": "A = 1\n"})
+        self.ok("fail", "A", "--reason", "다시")
+        self.assertIn("메인 체크아웃", self.refused("start", "A", "--pool", "implement", "--agent", "x", cwd=wt))
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+
+
+class TestDecisionHolds(ModsCase):
+    """e2e5 5-1·5-13·E5-8: 사용자가 정한다고 한 저장 방식이 자동 채택됐고, 데이터 결정 때문에 구현까지 멈췄다."""
+
+    def decide(self, did="D-1", tasks="A", kind="architecture", *extra):
+        return self.ok("decide", "add", "--id", did, "--title", "저장", "--question", "어디에?", "--tasks", tasks,
+                       "--option", "A: 새 테이블", "--option", "B: 기존 표", "--kind", kind, "--recommend", "A",
+                       "--why", "분리", *extra)
+
+    def test_ask_user_refuses_adopt(self):
+        self.add("A")
+        self.decide("D-1", "A", "architecture", "--ask-user")
+        self.ok("away")
+        self.assertIn("사용자", self.refused("decide", "adopt", "D-1"))
+
+    def test_hold_merge_lets_work_start_but_not_merge(self):
+        self.ready_to_merge("A")
+        self.add("B", paths="b/")
+        self.decide("D-2", "A,B", "data", "--hold", "merge")
+        self.assertIn("B", [t["id"] for t in self.ok("next", "--pool", "implement")["dispatch"]])  # 구현은 시작한다
+        self.ok("start", "B", "--pool", "implement", "--agent", "i2")
+        merge = self.ok("next", "--pool", "merge")
+        self.assertEqual(merge["dispatch"], [])
+        self.assertIn("D-2", merge["waiting"][0]["why"])
+        code, status, out = self.integrate("A")
+        self.assertEqual((code, status), (2, "REJECTED"))
+        self.ok("decide", "answer", "D-2", "--choice", "A")
+        self.assertEqual(self.integrate("A")[:2], (0, "MERGED"))
+
+    def test_hold_value_is_checked_and_shown(self):
+        self.add("A")
+        self.assertIn("invalid choice", self.refused("decide", "add", "--id", "D-1", "--title", "t", "--question", "q",
+                                                     "--option", "A: a", "--option", "B: b", "--tasks", "A", "--hold", "x"))
+        self.decide("D-1", "A", "data", "--hold", "merge", "--ask-user")
+        d = next(x for x in self.snapshot()["decisions"] if x["id"] == "D-1")
+        self.assertEqual((d["hold"], d["ask_user"]), ("merge", True))
+
+
+class TestNextAttention(ModsCase):
+    """e2e5 E5-1: manager가 `next --pool merge`만 491번 불러 RETRY를 65분 동안 몰랐다. 어느 next든 주의할 작업을 보인다."""
+
+    def test_every_next_lists_retry_and_open_decisions(self):
+        self.add("A")
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+        self.ok("fail", "A", "--reason", "verifier FAIL")
+        self.add("B", paths="b/")
+        self.ok("decide", "add", "--id", "D-1", "--title", "t", "--question", "q", "--tasks", "B",
+                "--option", "A: a", "--option", "B: b")
+        for pool in ("merge", "verify", "research", "implement"):
+            with self.subTest(pool=pool):
+                att = self.ok("next", "--pool", pool)["attention"]
+                self.assertIn({"id": "A", "state": "RETRY", "why": "verifier FAIL"}, att)
+                self.assertIn("D-1", " ".join(x["why"] for x in att))
+
+
+class TestNotesDirInWorktree(ModsCase):
+    """e2e5 5-12: worktree implementer가 공유 notes 폴더(worktree 밖)에 Write를 거부당해 작업이 멈췄다."""
+
+    def test_notes_dir_is_inside_the_caller_checkout_and_ignored(self):
+        self.add("A")
+        self.ok("start", "A", "--pool", "implement", "--agent", "impl")
+        wt = self.worktree("A", {"src/a.py": "A = 1\n"})
+        d = Path(self.ok("notes-dir", "A", cwd=wt)["notes_dir"])
+        self.assertTrue(os.path.samefile(d.parent.parent, wt))
+        (d / "check.py").write_text("print(1)\n", encoding="utf-8")
+        self.assertEqual(self.repo.git("status", "--porcelain", cwd=wt), "")  # 커밋 대상이 아니다
+        main = Path(self.ok("notes-dir", "A")["notes_dir"])
+        self.assertTrue(os.path.samefile(main.parent.parent, self.repo.path))
+        self.assertEqual(self.repo.git("status", "--porcelain"), "")
+
+
+class TestDesignReview(ModsCase):
+    """5-19: 큰 설계는 다른 검토자가 PASS해야 구현을 배정한다. 끄거나(off) 매번 묻게(ask) 할 수 있다."""
+
+    def designed(self, tid="A", depth="deep"):
+        self.add(tid, risk="low", needs_design=depth)
+        self.ok("start", tid, "--pool", "design", "--agent", "architect")
+        return self.ok("done", tid, "--notes", f"docs/{tid}.md")
+
+    def test_deep_design_waits_for_review(self):
+        self.assertEqual(self.designed()["state"], "PENDING")
+        self.assertEqual(self.ok("next", "--pool", "design")["dispatch"], [])  # architect에게 다시 주지 않는다
+        rev = self.ok("next", "--pool", "review")["dispatch"]
+        self.assertEqual([(t["id"], t["marker"]) for t in rev], [("A", "[auto-task id=A pool=review attempt=1]")])
+        self.assertIn("구현을 시작할 수 없다", self.refused("start", "A", "--pool", "implement", "--agent", "i"))
+        out = self.ok("design-review", "A", "--verifier", "rv", "--verdict", "FAIL", "--notes", "오류 계약 빠짐")
+        self.assertEqual(out["state"], "PENDING")
+        self.assertEqual([t["id"] for t in self.ok("next", "--pool", "design")["dispatch"]], ["A"])  # 다시 설계
+        self.ok("start", "A", "--pool", "design", "--agent", "architect")
+        self.ok("done", "A", "--notes", "docs/A.md")
+        self.assertEqual(self.ok("design-review", "A", "--verifier", "rv", "--verdict", "PASS")["state"], "READY")
+        self.assertEqual(self.task(self.snapshot(), "A")["design_review"]["verdict"], "PASS")
+
+    def test_standard_design_skips_review_and_off_mode(self):
+        self.assertEqual(self.designed("S", "standard")["state"], "READY")
+        self.ok("review-mode", "off")
+        self.assertEqual(self.designed("B")["state"], "READY")
+        self.assertEqual(self.snapshot()["design_review_mode"], "off")
+
+    def test_ask_mode_skip_needs_answered_decision(self):
+        self.ok("review-mode", "ask")
+        self.assertEqual(self.designed()["state"], "PENDING")
+        self.ok("decide", "add", "--id", "D-R", "--title", "설계 검증", "--question", "받을까?", "--tasks", "A",
+                "--option", "Y: 받는다", "--option", "N: 건너뛴다", "--kind", "direction", "--recommend", "Y")
+        self.assertIn("D-R", self.refused("design-review", "A", "--skip", "--decision", "D-R"))
+        self.ok("decide", "answer", "D-R", "--choice", "N")
+        self.assertEqual(self.ok("design-review", "A", "--skip", "--decision", "D-R")["state"], "READY")
+        self.assertIn("invalid choice", self.refused("review-mode", "sometimes"))
+
+
+class TestGitTimeout(ModsCase):
+    """5-20: 잠금을 쥔 채 git이 멈추면 120초 뒤 다른 프로세스가 잠금을 치우고 함께 쓴다. git에 시간 제한을 둔다."""
+
+    def test_hung_git_is_refused_not_waited(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sched_t", self.repo.path / ".claude/hooks/sched.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        seen = {}
+
+        def hung(cmd, **kw):  # git이 멈춘 것처럼: 시간 제한이 넘어오면 그 시간에 끊긴다
+            seen.update(kw)
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+        from unittest import mock
+        with mock.patch.object(mod.subprocess, "run", hung), self.assertRaises(mod.Refused) as cm:
+            mod.run_git(self.repo.path, "status")
+        self.assertEqual(seen.get("timeout"), mod.GIT_TIMEOUT_S)
+        self.assertLess(mod.GIT_TIMEOUT_S, 120)  # 상태 잠금을 오래된 것으로 볼 시간보다 짧다
+        self.assertIn("시간", str(cm.exception))
 
 
 class TestCommonCode(ModsCase):
