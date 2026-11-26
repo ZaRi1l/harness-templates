@@ -28,6 +28,16 @@ export type Palette = 'theme' | 'night'
 export const PALETTES: readonly Palette[] = ['theme', 'night']
 export const PALETTE_LABEL: Record<Palette, string> = { theme: '테마', night: '밤하늘' }
 export const NIGHT_BG = '#0d1330'
+export const paletteBackground = (p: string): string | undefined => {
+  switch (p) {
+    case 'night': return NIGHT_BG
+    case 'dracula': return '#282a36'
+    case 'nord': return '#2e3440'
+    case 'catppuccin-mocha': return '#1e1e2e'
+    case 'slate-dark': return '#0f172a'
+    default: return undefined
+  }
+}
 const TONES: Record<Palette, Record<Tone, string | undefined>> = {
   theme: { ok: 'success', warn: 'warning', err: 'error', accent: 'claude', info: 'suggestion', dim: undefined, plain: undefined },
   // 제목·별은 별빛, 실행은 하늘, 완료는 연두, 대기·설명은 흐린 보라, 경고는 주황
@@ -63,10 +73,10 @@ const ACTIVE = new Set(['RESEARCHING', 'DESIGNING', 'PREVIEWING', 'IMPLEMENTING'
 const WAITING = new Set(['PENDING', 'READY', 'AWAITING_APPROVAL'])
 const RUNNING_STATES: Record<string, string> = { RESEARCHING: 'research', DESIGNING: 'design', PREVIEWING: 'preview', IMPLEMENTING: 'implement' }
 
-export const inFilter = (t: SnapTask, f: QueueFilter) =>
+export const inFilter = (t: SnapTask, f: QueueFilter, runs: Run[] = []) =>
   f === 'all' ||
-  (f === 'active' && ACTIVE.has(t.state)) ||
-  (f === 'waiting' && (WAITING.has(t.state) || t.decisions_open.length > 0)) ||
+  (f === 'active' && (ACTIVE.has(t.state) || reviewing(t, runs))) ||
+  (f === 'waiting' && !reviewing(t, runs) && (WAITING.has(t.state) || t.decisions_open.length > 0)) ||
   (f === 'blocked' && t.state === 'BLOCKED') ||
   (f === 'done' && (t.state === 'COMPLETED' || t.state === 'CANCELLED'))
 
@@ -539,6 +549,10 @@ export const applyAgentList = (runs: Run[], agents: readonly AgentSeen[], now: n
     return { ...r, tokens, status, endedMs: status === 'idle' ? (r.status === 'idle' ? r.endedMs : now) : null, lastActiveMs: status === 'running' && r.status === 'idle' ? now : r.lastActiveMs }
   })
 }
+/** turn.complete는 한 번의 일을 마친 관측이다. 팀원은 다시 불릴 수 있으므로 종료가 아닌 대기로 둔다. */
+export const applyTurnComplete = (runs: Run[], agentId: string, now: number): Run[] =>
+  runs.map(r => r.agentId === agentId && r.status === 'running' ? { ...r, status: 'idle', endedMs: now } : r)
+
 export const slotUsed = (snap: Snapshot) => POOLS.reduce((n, p) => n + (snap.slots[p]?.used ?? 0), 0)
 export const openDecisions = (snap: Snapshot | null): Decision[] => (snap?.decisions ?? []).filter(d => d.state === 'OPEN')
 export const awaiting = (snap: Snapshot | null) => (snap?.tasks ?? []).filter(t => t.state === 'AWAITING_APPROVAL')
@@ -799,12 +813,16 @@ export const headerLines = (snap: Snapshot, meta: SnapMeta, runs: Run[], now: nu
   return [...lines.map(l => fitLine(l, width)), rule(width)]
 }
 
-const ORDER: Record<string, number> = { IMPLEMENTING: 0, RETRY: 0, VERIFYING: 1, MERGING: 1, READY_TO_MERGE: 1, PREVIEWING: 2, DESIGNING: 2, RESEARCHING: 2, AWAITING_APPROVAL: 3, BLOCKED: 4, READY: 5, PENDING: 6, COMPLETED: 7 }
+const ORDER: Record<string, number> = { IMPLEMENTING: 0, RETRY: 0, VERIFYING: 1, MERGING: 1, READY_TO_MERGE: 1, PREVIEWING: 2, DESIGNING: 2, RESEARCHING: 2, AWAITING_APPROVAL: 3, READY: 4, PENDING: 5, BLOCKED: 6, COMPLETED: 7 }
+const reviewing = (t: SnapTask, runs: Run[]) => !isDone(t) && runs.some(r => r.task === t.id && r.pool === 'review' && r.status === 'running')
+const taskMark = (t: SnapTask, runs: Run[]) => reviewing(t, runs) ? { mark: '◎', label: '설계 검토', tone: 'info' as Tone } : mark(t.state)
+const taskOrder = (t: SnapTask, runs: Run[]) => reviewing(t, runs) ? 2 : ORDER[t.state] ?? 9
+const compareTasks = (runs: Run[]) => (a: SnapTask, b: SnapTask) => taskOrder(a, runs) - taskOrder(b, runs) || Number(b.runnable) - Number(a.runnable) || b.priority - a.priority
 
 /** 현황 탭: 작업 표, manager 설명, 병목, 최근 변화. 숫자 요약은 머리말에 있다. */
 export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: number): Line[] => {
   const lines: Line[] = [section('작업', width)]
-  const sorted = snap.tasks.filter(t => t.state !== 'CANCELLED').sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9) || b.priority - a.priority)
+  const sorted = snap.tasks.filter(t => t.state !== 'CANCELLED').sort(compareTasks(runs))
   const live = sorted.filter(t => t.state !== 'COMPLETED')
   const doneN = sorted.length - live.length
   // 진행 중인 것이 있으면 완료는 한 줄로 접는다(쌓이면 진행 중인 것이 안 보인다)
@@ -813,7 +831,7 @@ export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: n
   const idW = Math.min(32, Math.max(8, ...tasks.slice(0, 8).map(t => strWidth(t.id)))) // ID는 자르지 않고 제목을 줄인다
   const titleW = Math.max(8, width - 2 - (idW + 1) - 9 - 22)
   for (const t of tasks.slice(0, 8)) {
-    const m = mark(t.state)
+    const m = taskMark(t, runs)
     const r = runningRuns(runs).find(x => x.task === t.id)
     const latest = t.preview.versions[t.preview.versions.length - 1]
     const who = r
@@ -828,7 +846,7 @@ export const overviewLines = (snap: Snapshot, runs: Run[], now: number, width: n
     lines.push([
       { text: `${m.mark} `, tone: m.tone },
       { text: `${pad(t.id, idW)} `, bold: true },
-      { text: `${pad(m.label, 8)} `, tone: m.tone },
+      { text: `${pad(m.label, Math.max(8, strWidth(m.label)))} `, tone: m.tone },
       { text: `${pad(t.title, titleW)} `, tone: t.state === 'COMPLETED' ? 'dim' : 'plain' },
       { text: who, tone: whoTone },
     ])
@@ -881,35 +899,38 @@ export const costText = (t: SnapTask, tok: TaskTokens) => {
  * 진행 중·대기·보류를 위에, 완료·취소는 아래에 접어 둔다(showDone이면 최근 완료 20개까지).
  * 필터가 '완료'면 완료만 펼친다.
  */
-export const queueLines = (snap: Snapshot, filter: QueueFilter, expanded: string | null, width: number, showDone = false, tok: TaskTokens = {}): Row[] => {
-  const matched = snap.tasks.filter(t => inFilter(t, filter))
+export const queueLines = (snap: Snapshot, filter: QueueFilter, expanded: string | null, width: number, showDone = false, tok: TaskTokens = {}, runs: Run[] = []): Row[] => {
+  const matched = snap.tasks.filter(t => inFilter(t, filter, runs))
   if (matched.length === 0) return [{ line: [{ text: '해당하는 작업이 없다', tone: 'dim' }] }]
-  const live = matched.filter(t => !isDone(t)).sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9) || b.priority - a.priority)
+  const live = matched.filter(t => !isDone(t)).sort(compareTasks(runs))
   const done = matched.filter(isDone).sort((a, b) => (b.completed ?? b.updated).localeCompare(a.completed ?? a.updated))
   const out: Row[] = []
   const push = (line: Line, id?: string) => out.push({ line: fitLine(line, width), id })
   const open = filter === 'done' || showDone
   const idW = Math.min(32, Math.max(4, ...matched.map(t => strWidth(t.id)))) + 1 // ID는 자르지 않고 제목을 줄인다
   const draw = (t: SnapTask) => {
-    const m = mark(t.state)
+    const m = taskMark(t, runs)
     const cost = t.state === 'COMPLETED' ? costText(t, tok) : ''
     push([
       { text: `${m.mark} `, tone: m.tone },
       { text: pad(t.id, idW), bold: true },
-      { text: pad(m.label, 8), tone: m.tone },
+      { text: pad(m.label, Math.max(10, strWidth(m.label))), tone: m.tone },
       { text: `p${t.priority} ${t.risk}/${t.profile} ↻${t.retries} `, tone: 'dim' },
       ...(t.profile === 'fast' ? [{ text: '작게 ', tone: 'accent' as Tone }] : []),
       { text: t.title },
       ...(cost ? [{ text: `  ${cost}`, tone: 'dim' as Tone }] : []),
     ], t.id)
     const why = t.decisions_open.length ? `결정 대기 ${t.decisions_open.join(',')}` : t.waiting
-    if (why) push([{ text: `    ⋯ ${why}`, tone: t.runnable ? 'ok' : 'warn' }])
+    if (reviewing(t, runs)) push([{ text: '    ⋯ 설계 검토 진행 중', tone: 'ok' }])
+    else if (why) push([{ text: `    ⋯ ${why}`, tone: t.runnable ? 'ok' : 'warn' }])
     else if (t.runnable) push([{ text: `    ▶ ${POOL_LABEL[t.pool ?? ''] ?? t.pool} 시작 가능`, tone: 'ok' }])
     if (t.deps.length) push([{ text: `    ← ${t.deps.map(d => `${d}${mark(snap.tasks.find(x => x.id === d)?.state ?? '').mark}`).join(' ')}`, tone: 'dim' }])
     if (expanded === t.id) {
+      if (t.branch) wrapText(t.branch, Math.max(12, width - 14), 10).forEach((line, i) => push(kv(i === 0 ? '    브랜치' : '          ', line)))
+      if (t.worktree) wrapText(t.worktree, Math.max(12, width - 16), 10).forEach((line, i) => push(kv(i === 0 ? '    worktree' : '            ', line)))
       push(kv('    담당', t.paths.join(', ')))
       if (t.forbid.length) push(kv('    금지', t.forbid.join(', ')))
-      push(kv('    완료 기준', t.criteria))
+      wrapText(t.criteria, Math.max(12, width - 16), 60).forEach((line, i) => push(kv(i === 0 ? '    완료 기준' : '             ', line)))
       if (t.design_depth) push(kv('    설계', `${t.design_depth}${t.notes?.length ? ` · 노트 ${t.notes[t.notes.length - 1]}` : ''}`))
       else if (t.notes?.length) push(kv('    노트', t.notes[t.notes.length - 1] ?? ''))
       const rv = t.design_review
@@ -988,10 +1009,11 @@ export const liveDependents = (snap: Snapshot | null, task: string) =>
  */
 export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expanded: string | null, showDone = false, width = 90): Line[] => {
   const out: Line[] = []
+  const push = (line: Line) => out.push(fitLine(line, width))
   const g = doneGroups(snap, runs)
   const running = runningRuns(runs)
-  if (runs.length === 0) out.push([{ text: '이 세션에서 관측한 서브에이전트가 없다', tone: 'dim' }])
-  else out.push(head(`실행 중 ${running.length} · 대기 ${g.idle.length} · 끝남 ${g.ended.length}`))
+  if (runs.length === 0) push([{ text: '이 세션에서 관측한 서브에이전트가 없다', tone: 'dim' }])
+  else push(head(`실행 중 ${running.length} · 대기 ${g.idle.length} · 끝남 ${g.ended.length}`))
   const ended = new Set(g.ended.map(r => r.agentId))
   const rank = (r: Run) => (r.status === 'running' ? 0 : ended.has(r.agentId) ? 2 : 1)
   const base = 5 + 2 + ROLE_W + 1 + STEP_W + 7 // 들여쓰기·가지, 기호, 역할, 단계, 시간
@@ -1005,7 +1027,7 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
     const step = r.task
       ? `${POOL_LABEL[r.pool ?? ''] ?? r.pool ?? ''}${round && round > 1 ? ` ${round}회차` : ''}${r.status === 'idle' && !done ? ' (팀원 대기)' : ''}`
       : fit(r.description || '미연결', STEP_W)
-    out.push([
+    push([
       { text: `  ${branch} `, tone: 'dim' },
       { text: `${sym} `, tone },
       { text: pad(r.role, ROLE_W), bold: true },
@@ -1016,24 +1038,38 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
       ...(cols.last ? [{ text: `  ${r.lastTool || ''}${r.errors ? ` · 오류 ${r.errors}` : ''}`, tone: 'dim' as Tone }] : []),
     ])
     if (expanded === r.agentId) {
-      out.push(kv('       id', r.agentId))
-      out.push(kv('       폴더', r.cwd || '-'))
+      push(kv('       id', r.agentId))
+      push(kv('       폴더', r.cwd || '-'))
       const t = r.task ? snap?.tasks.find(x => x.id === r.task) : undefined
-      if (t) out.push(kv('       브랜치', `${t.branch ?? '-'} @ ${short(t.head)} · 스케줄러 상태 ${t.state}`))
+      if (t) {
+        if (t.worktree) wrapText(t.worktree, Math.max(12, width - 16), 5).forEach((line, i) => push(kv(i === 0 ? '       worktree' : '               ', line)))
+        if (t.branch) wrapText(t.branch, Math.max(12, width - 16), 5).forEach((line, i) => push(kv(i === 0 ? '       브랜치' : '             ', line)))
+        push(kv('       상태', `${t.state} @ ${short(t.head)}`))
+      }
     }
   }
   const group = (id: string, rs: Run[]) => {
     const t = snap?.tasks.find(x => x.id === id)
     const m = t ? mark(t.state) : { mark: '?', label: '스냅샷에 없음', tone: 'warn' as Tone }
     const waitFor = t && ['COMPLETED', 'CANCELLED'].includes(t.state) && rs.some(r => r.status === 'idle' && !ended.has(r.agentId)) ? liveDependents(snap, id) : []
-    out.push([
+    const headLine: Line = [
       { text: `${m.mark} `, tone: m.tone },
       { text: `${id}  `, bold: true }, // ID는 자르지 않는다(무슨 작업인지 알아보게)
       { text: m.label, tone: m.tone },
-      // 설계(계약) 작업이면 계약을 쓰는 중, 아니면 순서만 걸린 것
       ...(waitFor.length ? [{ text: ` · ${waitFor.join('·')}${rs.some(r => r.pool === 'design') ? '가 이 계약을 쓰는 중' : '가 이 작업 뒤에 이어짐'}`, tone: 'dim' as Tone }] : []),
-      ...(t?.title ? [{ text: ` · ${t.title}` }] : []), // 폭이 모자라면 제목 끝부터 줄어든다
-    ])
+    ]
+    if (t?.title) {
+      const titleLines = wrapText(`· ${t.title}`, Math.max(12, width - 4), 3)
+      if (titleLines.length === 1 && lineWidth(headLine) + strWidth(titleLines[0] ?? '') + 1 <= width) {
+        headLine.push({ text: ` ${titleLines[0]}` })
+        push(headLine)
+      } else {
+        push(headLine)
+        for (const tl of titleLines) push([{ text: `  ${tl}`, tone: 'dim' }])
+      }
+    } else {
+      push(headLine)
+    }
     const sorted = [...rs].sort((a, b) => rank(a) - rank(b) || b.startedMs - a.startedMs)
     sorted.forEach((r, i) => row(r, i === sorted.length - 1 ? '└─' : '├─'))
   }
@@ -1049,20 +1085,20 @@ export const agentLines = (snap: Snapshot | null, runs: Run[], now: number, expa
   const doneTasks = tasks.filter(x => x.rank === 2)
   const doneAgents = doneTasks.reduce((n, x) => n + x.rs.length, 0)
   if (doneTasks.length) {
-    out.push(section(`끝남 ${doneAgents}${showDone ? '' : ' (접힘)'}`, width))
+    push(section(`끝남 ${doneAgents}${showDone ? '' : ' (접힘)'}`, width))
     if (showDone) doneTasks.slice(0, 12).forEach(t => group(t.id, t.rs))
   }
   const unlinked = runs.filter(r => !r.task)
   if (unlinked.length && (showDone || unlinked.some(r => r.status === 'running'))) {
-    out.push(section('미연결(marker 없음)', width))
+    push(section('미연결(marker 없음)', width))
     const shown = [...unlinked].sort((a, b) => rank(a) - rank(b)).filter(r => showDone || r.status === 'running')
     shown.forEach((r, i) => row(r, i === shown.length - 1 ? '└─' : '├─'))
   }
   const missing = unobservedHolders(snap, runs, now)
   if (missing.length) {
-    out.push(section('슬롯은 잡혔지만 이 세션에서 실행이 관측되지 않은 작업', width))
-    for (const t of missing) out.push([{ text: `○ ${t.id} ${mark(t.state).label} · 배정 ${t.agent ?? '-'} #${t.attempts ?? 0}`, tone: 'warn' }])
-    out.push([{ text: '  다른 세션에서 실행 중이거나, 세션이 끊겼을 수 있다(manager가 sched recover로 확인)', tone: 'dim' }])
+    push(section('슬롯은 잡혔지만 이 세션에서 실행이 관측되지 않은 작업', width))
+    for (const t of missing) push([{ text: `○ ${t.id} ${mark(t.state).label} · 배정 ${t.agent ?? '-'} #${t.attempts ?? 0}`, tone: 'warn' }])
+    push([{ text: '  다른 세션에서 실행 중이거나, 세션이 끊겼을 수 있다(manager가 sched recover로 확인)', tone: 'dim' }])
   }
   return out
 }

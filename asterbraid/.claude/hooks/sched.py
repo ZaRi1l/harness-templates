@@ -324,6 +324,8 @@ def cmd_preview(a, root, cfg):
 def cmd_approve(a, root, cfg):
     with store(root) as st:
         t = get(st, a.id)
+        if a.by == "manager":
+            raise Refused("미리보기는 manager 위임 승인을 지원하지 않는다. 사용자 승인을 기다리거나 sched away --previews를 쓴다")
         if a.by == "away":  # asterbraid 추가(4-5): 사용자가 미리보기까지 위임했을 때만 추천안(최신 버전)을 승인한다
             if not st["away"]:
                 raise Refused("자리 비움 중이 아니다. by away 승인은 사용자가 자리 비움을 켰을 때만 한다")
@@ -567,6 +569,7 @@ def cmd_status(a, root, cfg):
         open_dec = sorted(d["id"] for d in st["decisions"].values() if d["state"] == "OPEN")
         out = {"integration_branch": st["integration_branch"], "counts": counts, "slots": slots,
                "ready_now": [t["id"] for t in ready], "paused": st["paused"], "decisions_open": open_dec,
+               "decision_policy": decision_policy(st),
                "anomalies": warn, "warnings": settings_warnings(root)}
         if a.json:
             out["tasks"] = tasks
@@ -781,21 +784,26 @@ def cmd_decide(a, root, cfg):
             raise Refused(f"결정이 없다: {a.id}")
         if d["state"] != "OPEN":
             raise Refused(f"{a.id}는 OPEN이 아니다({d['state']}). 이미 응답·취소된 결정은 바꾸지 않는다. 새 결정을 연다")
-        if a.action == "adopt":  # asterbraid 추가(4-5): 자리 비움 중 추천안 채택
-            if not st["away"]:
-                raise Refused("자리 비움 중이 아니다. 사용자가 답할 때까지 기다린다")
-            if d.get("ask_user"):
+        if a.action == "adopt":
+            policy = decision_policy(st)
+            if policy == "direct":
+                raise Refused("자리 비움·전체 위임 중이 아니다. 사용자가 답할 때까지 기다린다")
+            if policy == "away" and d.get("ask_user"):
                 raise Refused("사용자가 직접 정한다고 한 결정이다(--ask-user). 사용자가 돌아오면 묻는다")
-            if d["kind"] not in ADOPTABLE_KINDS:
+            if policy == "away" and d["kind"] not in ADOPTABLE_KINDS:
                 raise Refused(f"{d['kind']} 결정은 위임 범위가 아니다(위임: {', '.join(ADOPTABLE_KINDS)}). 사용자가 돌아오면 묻는다")
             if not d["recommend"]:
                 raise Refused("추천안이 없는 결정은 채택할 수 없다. 사용자가 돌아오면 묻는다")
-            d.update(state="ANSWERED", choice=d["recommend"], note="자리 비움 중 추천안 채택", by="away", answered_at=now())
+            by = "manager" if policy == "all" else "away"
+            d.update(state="ANSWERED", choice=d["recommend"], note=f"{policy} 위임으로 추천안 채택", by=by, answered_at=now())
+            if policy == "all":
+                d["delegation"] = {"policy": policy, **st["decision_delegation"]}
             label = next(o["label"] for o in d["options"] if o["key"] == d["recommend"])
-            log_away(st, "decision", d["id"], f"{d['title']}: {d['recommend']} ({label})", choice=d["recommend"])
+            log_away(st, "decision", d["id"], f"{d['title']}: {d['recommend']} ({label})", choice=d["recommend"],
+                     by=by, policy=policy, why=d["why"], evidence=d["evidence"])
         elif a.action == "answer":
-            if a.by == "away":
-                raise Refused("자리 비움 중 결정은 decide adopt로 한다(추천안·위임 범위를 확인한다)")
+            if a.by in ("away", "manager"):
+                raise Refused("위임된 결정은 decide adopt로 한다(추천안·위임 범위를 확인한다)")
             if a.choice not in [o["key"] for o in d["options"]]:
                 raise Refused(f"선택지에 없다: {a.choice}. 선택지: {[o['key'] for o in d['options']]}")
             d.update(state="ANSWERED", choice=a.choice, note=a.note or None, by=a.by, answered_at=now())
@@ -809,16 +817,34 @@ def log_away(st: dict, kind: str, key: str, text: str, **fields) -> None:
                                          **fields}])[-NOTES_KEPT:]
 
 
+def cmd_decision_policy(a, root, cfg):
+    with store(root) as st:
+        if a.policy not in DECISION_POLICIES:
+            raise Refused(f"결정 정책은 {DECISION_POLICIES} 중 하나다: {a.policy}")
+        if a.policy == "direct":
+            st["away"] = None
+            st["decision_delegation"] = None
+        elif a.policy == "away":
+            st["away"] = {"at": now(), "previews": False, "reason": a.reason or "명령으로 자리 비움"}
+            st["decision_delegation"] = None
+        elif a.policy == "all":
+            st["away"] = None
+            st["decision_delegation"] = {"at": now(), "reason": a.reason or "명령으로 전체 위임"}
+        return {"decision_policy": decision_policy(st)}
+
+
 def cmd_away(a, root, cfg):
     with store(root) as st:
         st["away"] = {"at": now(), "previews": a.previews, "reason": a.reason}
-        return {"away": st["away"], "adoptable": list(ADOPTABLE_KINDS)}
+        st["decision_delegation"] = None
+        return {"away": st["away"], "adoptable": list(ADOPTABLE_KINDS), "decision_policy": "away"}
 
 
 def cmd_back(a, root, cfg):
     with store(root) as st:
         st["away"] = None
-        return {"away": None, "auto": [x for x in st["away_log"] if x["reviewed"] is None]}
+        st["decision_delegation"] = None
+        return {"away": None, "decision_policy": "direct", "auto": [x for x in st["away_log"] if x["reviewed"] is None]}
 
 
 def cmd_away_review(a, root, cfg):
@@ -952,6 +978,7 @@ def main() -> int:
         (("--hold",), {"default": "start", "choices": HOLDS}), (("--ask-user",), {"action": "store_true"}))
     cmd("pause", cmd_pause, REASON)
     cmd("resume", cmd_resume)
+    cmd("decision-policy", cmd_decision_policy, (("policy",), {"choices": DECISION_POLICIES}), REASON)
     cmd("away", cmd_away, (("--previews",), {"action": "store_true"}), REASON)
     cmd("back", cmd_back)
     cmd("away-review", cmd_away_review, (("key",), {}), (("--keep",), {"action": "store_true"}),

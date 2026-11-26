@@ -647,8 +647,9 @@ test('명령 탭: 자리 비움 버튼과 갱신 간격 − +', async ($, on) =>
   expect(await ui.find({ type: 'Text', text: /갱신 1초/ })).toBeDefined() // 기본 1초
   await ui.press({ key: 'rate-up' })
   expect(await ui.find({ type: 'Text', text: /갱신 2초/ })).toBeDefined()
-  await ui.press({ key: 'cmd-away-previews' })
-  expect(calls.argv.find(a => a.includes('away'))?.slice(-3)).toEqual(['away', '--previews', '--reason=TUI에서 자리 비움'])
+  await ui.select({ key: 'decision-mode', value: 'away' })
+  await ui.press({ key: 'decision-mode-apply' })
+  expect(calls.argv.some(a => a.includes('decision-policy') && a.includes('away'))).toBe(true)
   await ui.unmount()
 })
 
@@ -721,8 +722,9 @@ test('처음 열면(시작 준비 전) 빈 스냅샷을 만들어 명령 탭 버
   expect(calls.argv.some(a => a.includes('snapshot'))).toBe(true)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-commands' })
-  await ui.press({ key: 'cmd-away-previews' })
-  expect(calls.argv.find(a => a.includes('away'))?.slice(-3)).toEqual(['away', '--previews', '--reason=TUI에서 자리 비움'])
+  await ui.select({ key: 'decision-mode', value: 'away' })
+  await ui.press({ key: 'decision-mode-apply' })
+  expect(calls.argv.some(a => a.includes('decision-policy') && a.includes('away'))).toBe(true)
   await ui.unmount()
 })
 
@@ -849,10 +851,10 @@ test('4-15 밤하늘 색: 명령 탭에서 고르면 Pane 바탕과 글자색이
   expect(C.toneColor('night', 'ok')).toMatch(/^#/)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-commands' })
-  await ui.press({ key: 'palette-night' })
-  expect((await ui.drawn() as { props?: Record<string, unknown> }).props?.backgroundColor).toBe(C.NIGHT_BG)
+  await ui.select({ key: 'palette', value: 'night' })
+  expect((await ui.drawn() as { props?: Record<string, unknown> }).props?.backgroundColor).toBe(C.paletteBackground('night'))
   expect((await ui.findAll({ type: 'Text', text: /^✦ ASTERBRAID/ })).some(x => x.props.color === C.toneColor('night', 'accent'))).toBe(true) // 줄 안의 제목 조각
-  await ui.press({ key: 'palette-theme' })
+  await ui.select({ key: 'palette', value: 'theme' })
   expect((await ui.drawn() as { props?: Record<string, unknown> }).props?.backgroundColor).toBeUndefined()
   await ui.unmount()
 })
@@ -902,6 +904,45 @@ test('e2e6 E6-5: 머리말·에이전트 탭의 "실행 미확인"도 1분 유�
   expect(text(C.headerLines(snap, C.EMPTY_META, [], at + 16_000, [], 90, 1000))).not.toContain('실행 미확인')
   expect(text(C.agentLines(snap, [], at + 16_000, null))).not.toContain('관측되지 않은')
   expect(text(C.headerLines(snap, C.EMPTY_META, [], at + 61_000, [], 90, 1000))).toContain('실행 미확인 1')
+})
+
+test('e2e7: turn.complete는 목록에 없는 검토자를 대기로 옮기고 멈춤 경고를 끝낸다', async () => {
+  const runs = [run({ agentId: 'reviewer', task: 'T', pool: 'review' }), run({ agentId: 'isolated' })]
+  const next = C.applyTurnComplete(runs, 'reviewer', 100)
+  expect(next[0]?.status).toBe('idle')
+  expect(next[0]?.endedMs).toBe(100)
+  expect(next[1]?.status).toBe('running')
+  expect(C.applyAgentList(runs, [], 100)[0]?.status).toBe('running')
+  expect(C.anomalies(null, next, 1000, 200).some(a => a.agentId === 'reviewer')).toBe(false)
+  expect(C.applyTurnComplete([run({ status: 'failed' })], 'a1', 100)[0]?.status).toBe('failed')
+})
+
+test('e2e7: 실행 중 설계 검토는 대기 대신 검토로 보이고 보류는 시작 가능한 작업 아래다', async () => {
+  const snap = { ...SNAP, tasks: [task({ id: 'BLOCK', state: 'BLOCKED', runnable: false }), task({ id: 'WAIT', state: 'PENDING' }), task({ id: 'REVIEW', state: 'PENDING', review_pending: true })] }
+  const runs = [run({ task: 'REVIEW', pool: 'review' })]
+  const rows = C.queueLines(snap, 'all', null, 120, false, {}, runs)
+  expect(rows.filter(r => r.id).map(r => r.id)).toEqual(['REVIEW', 'WAIT', 'BLOCK'])
+  expect(rows.find(r => r.id === 'REVIEW')?.line.map(s => s.text).join('')).toContain('설계 검토')
+  expect(C.queueLines(snap, 'active', null, 120, false, {}, runs).filter(r => r.id).map(r => r.id)).toEqual(['REVIEW'])
+  expect(C.overviewLines(snap, runs, 0, 120).map(l => l.map(s => s.text).join('')).join('\n')).toContain('설계 검토')
+})
+
+test('e2e7: 펼친 상세·작업 제목·브랜치·worktree는 좁아도 내용이 사라지지 않는다', async () => {
+  const criteria = '완료 기준을 빠짐없이 확인한다 '.repeat(12).trim()
+  const branch = 'task/very-long-branch-name-that-must-not-disappear'
+  const worktree = '/repo/.worktrees/very-long-directory-that-must-not-disappear'
+  const snap = { ...SNAP, tasks: [task({ id: 'T', criteria, branch, worktree, title: '아주 긴 작업 제목을 모두 확인한다' })] }
+  const rows = C.queueLines(snap, 'all', 'T', 32)
+  const text = rows.map(r => r.line.map(s => s.text).join('')).join('\n').replace(/\s/g, '')
+  expect(text).toContain(criteria.replace(/\s/g, ''))
+  expect(text).toContain(branch)
+  expect(text).toContain(worktree)
+  const agents = C.agentLines(snap, [run({ task: 'T', cwd: worktree })], 0, 'a1', false, 32)
+  const joined = agents.map(l => C.fitLine(l, 32).map(s => s.text).join('')).join('\n').replace(/\s/g, '')
+  expect(joined).toContain('아주긴작업제목을모두확인한다')
+  expect(joined).toContain(branch)
+  expect(joined).toContain(worktree)
+  expect(agents.every(l => C.lineWidth(l) <= 32)).toBe(true)
 })
 
 test('머리말은 사용자 차례를 자리 비움 안내보다 먼저 보여 준다', async () => {

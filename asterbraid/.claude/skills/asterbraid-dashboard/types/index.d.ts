@@ -72,6 +72,9 @@ export type Decision = {
   ask_user?: boolean
 }
 
+export type DecisionMode = 'direct' | 'away' | 'all'
+export type Palette = 'theme' | 'night' | 'dracula' | 'nord' | 'catppuccin-mocha' | 'slate-dark'
+
 export type Snapshot = {
   schema: string
   schema_version: number
@@ -85,6 +88,7 @@ export type Snapshot = {
   /** 자리 비움 중 추천안으로 정한 것. reviewed: null(확인 전) | keep | redo:<새 결정 ID> */
   away_log?: AwayEntry[]
   design_review_mode?: string
+  decision_policy?: DecisionMode
   total: number
   completed: number
   counts: Record<string, number>
@@ -153,7 +157,9 @@ export type View = {
   tab: Tab
   layout: Layout | null
   /** 색(4-15). null이면 설정값 */
-  palette: 'theme' | 'night' | null
+  palette: Palette | null
+  /** 고른 결정 모드. 적용 전에는 스케줄러 상태를 바꾸지 않는다 */
+  pendingDecisionMode?: DecisionMode | null
   filter: QueueFilter
   taskMode: TaskMode
   expanded: string | null

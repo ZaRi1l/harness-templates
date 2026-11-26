@@ -45,6 +45,7 @@ DECISION_KINDS = ("ui", "ux", "architecture", "data", "breaking", "dependency", 
                   "environment", "limit", "other")
 # asterbraid 추가(4-5): 자리 비움 중 추천안으로 정해도 되는 결정 종류. 의존성·호환 깨짐·환경·데이터·한도는 사람이 정한다
 ADOPTABLE_KINDS = ("ui", "ux", "direction", "architecture", "requirements")
+DECISION_POLICIES = ("direct", "away", "all")
 REVIEW_MODES = ("off", "deep", "ask")
 HOLDS = ("start", "merge")  # 결정이 막는 단계: start(시작·통합 모두) / merge(통합만, 구현·테스트는 진행)
 TMP_DIR = ".asterbraid-tmp"  # notes-dir: 체크아웃마다 두는 임시 폴더(git이 무시)
@@ -55,6 +56,11 @@ NOTES_KEPT = 200
 
 
 # ---------- 규칙 ----------
+
+def decision_policy(st: dict) -> str:
+    """옛 상태의 away는 그대로 읽고, 전체 위임만 별도 명시 상태로 둔다."""
+    return "all" if st.get("decision_delegation") else "away" if st.get("away") else "direct"
+
 
 def norm(path: str) -> str:
     path = path.strip().strip("`'\"").replace("\\", "/")

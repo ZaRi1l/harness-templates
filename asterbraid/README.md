@@ -95,6 +95,7 @@ AI 도구의 소스·설정은 모두 `.claude/`에, 실행 중에 생기는 상
 .git/claude-auto/  state.json  dashboard.json(스냅샷)  integration-log.jsonl  previews/index.html  previews/<ID>/vN.html
 ```
 에이전트의 임시 스크립트·검사 파일은 체크아웃마다 `.asterbraid-tmp/<ID>/`(`sched notes-dir ID`)에 둔다. git이 무시하게(`.git/info/exclude`) 해 두어 커밋·제출·정리를 막지 않고, worktree 안이라 격리된 implementer도 쓸 수 있다.
+정식 회귀 테스트는 프로젝트의 `tests/` 등에 커밋하고, 임시 폴더에는 일회성 재현·브라우저 검사·로그만 둔다. manager가 끝 정리에서 `cleanup --dry-run` → `cleanup`을 실행하면 완료 작업의 임시 자료를 정리한다(진행·보류 작업은 보존, 빈 상위 폴더는 남을 수 있다). Git 무시는 빌드·테스트 도구의 탐색을 막는 보장이 아니므로 프로젝트 전체를 탐색하는 도구는 이 임시 폴더를 제외한다.
 Mod를 `.claude/mods/`가 아니라 `.claude/skills/`에 두는 것은 Claude Code가 프로젝트에서 자동으로 읽는 플러그인 위치가 `.claude/skills/<이름>/`뿐이어서다(`.claude/plugins/`도 읽지 않는다).
 
 ## 사용법
@@ -199,7 +200,7 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
 | 승인·결정 | 답할 것이 위: 열린 결정(선택지·장단점·추천·선택 버튼, "통합만 대기"·"직접 정함" 표시) → 검토 대기 미리보기(열기·승인·수정 요청 입력 → 한 번 더 확인) → 자리 비운 동안 자동으로 정한 것(최근 3건, [모두 보기]·[모두 이대로 둠]·[이대로 둠]·[다시 정하기]) |
 | 통합·지표 | 통합 브랜치 HEAD, 작업 브랜치와 검증 수, 통합 대기열, 최근 통합 결과, 스케줄러 지표와 Mod 관측(동시 실행, 토큰, 세션 비용 추정) |
 | 활동 | 상태 변화, 통합 결과, 결정, 에이전트 시작·끝, 도구 거부, 경고. 오류·경고만 보기 |
-| 명령 | 버튼으로: 새로고침, 브라우저 대시보드, 배치, Pane 닫기, 갱신 간격 −/+, 색(테마·밤하늘), 자리 비움·복귀, 설계 검토(끔·deep 설계만·deep마다 묻기), 새 배정 일시 중지·재개, 풀별 동시 실행 한도 −/+. 작업 우선순위 ▲/▼는 작업 탭에서 배정 전 작업을 펼쳐서. 아래에 같은 일을 하는 `/asterbraid` 명령 |
+| 명령 | 버튼·선택기로: 새로고침, 브라우저 대시보드, 배치, Pane 닫기, 갱신 간격 −/+, 색 선택(테마·밤하늘·Dracula·Nord·Catppuccin Mocha·Slate Dark), 사용자 결정 위임(직접 결정·자리 비움·전부 위임과 적용), 설계 검토(끔·deep 설계만·deep마다 묻기), 새 배정 일시 중지·재개, 풀별 동시 실행 한도 −/+. 작업 우선순위 ▲/▼는 작업 탭에서 배정 전 작업을 펼쳐서. 아래에 같은 일을 하는 `/asterbraid` 명령 |
 
 ## 명령 (`/asterbraid`)
 모델을 부르지 않고 바로 실행된다(manager가 응답하는 중에도).
@@ -217,7 +218,7 @@ Mod 끄기: `.claude/settings.local.json`에 `{"enabledPlugins": {"asterbraid-da
 | `away [previews]` / `back` | 자리 비움 켜기(미리보기 자동 승인 포함) / 복귀 |
 | `rate 1\|2\|5\|10` | 화면 갱신 간격(초). 고른 값은 다음 세션에도 남는다 |
 | `review off\|deep\|ask` | 설계 검토 끔 / deep 설계만 / deep마다 manager가 묻기 |
-| `palette theme\|night` | 색: 터미널 테마(기본, 밝은 터미널에도 맞는다) / 밤하늘(짙은 남색 바탕) |
+| `palette theme\|night\|dracula\|nord\|catppuccin-mocha\|slate-dark` | 색: 터미널 테마(기본, 밝은 터미널에도 맞는다) / 밤하늘 / Dracula / Nord / Catppuccin Mocha / Slate Dark |
 
 브라우저는 Windows `explorer.exe`(PATH에 없으면 `C:\Windows\explorer.exe`), macOS `open`, Linux `xdg-open`으로 연다(셸 없이). 열 수 없으면 사유와 전체 파일 경로를 알려 준다.
 

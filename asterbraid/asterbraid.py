@@ -40,7 +40,9 @@ class Refused(Exception):
 
 
 def sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # 텍스트 파일의 줄바꿈 차이(Windows CRLF vs LF)로 사용자가 손대지 않은 파일이
+    # '직접 수정한 파일'로 오인되어 업데이트가 건너뛰어지는 일을 막는다
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def harness_files() -> dict:

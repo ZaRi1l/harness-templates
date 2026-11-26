@@ -7,6 +7,7 @@
 | `hooks/register.tsx` | 이벤트 관찰(결과를 바꾸지 않음), 스냅샷 읽기, `/asterbraid`, Pane 그리기, 사용자 행동만 `sched.py`로 |
 | `hooks/core.ts` | 순수 함수: 스냅샷 검사, marker, 명령 해석, sched 인수, 문자 폭, 패널 줄, 경고 판정 |
 | `types/index.d.ts` | `$.state` 계약과 스냅샷 타입(sched.py `SNAPSHOT_SCHEMA` 1) |
-| `tests/dashboard.test.tsx` | `claude plugin test` |
+| `tests/dashboard.test.tsx` | `claude plugin test` (대시보드 전반) |
+| `tests/selectors.test.tsx` | `claude plugin test` (색·결정 모드 선택기) |
 
 검사: `claude plugin validate .`, `claude plugin test .`, (한 번 로드된 뒤) `npx -p typescript tsc -p .`. Claude Code 2.1.331 기준.

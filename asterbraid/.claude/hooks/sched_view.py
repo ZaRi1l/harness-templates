@@ -148,6 +148,7 @@ def snapshot(root: Path, cfg: dict, st: dict) -> dict:
         "project": {"root": str(root), "name": root.name, "state_dir": str(d)},
         "integration": {"branch": integ, "head": head},
         "paused": st.get("paused"), "away": st.get("away"), "away_log": st.get("away_log", [])[-30:],
+        "decision_policy": decision_policy(st),
         "design_review_mode": st.get("design_review") or cfg["design_review"],
         "total": len(tasks), "completed": counts.get("COMPLETED", 0), "counts": counts,
         "slots": {**{p: {"used": used(st, p), "limit": limit(st, cfg, p)} for p in SLOT_STATE},

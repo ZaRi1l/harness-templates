@@ -4,7 +4,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Activity, DocView, Run, SnapMeta, Snapshot, Tab, TaskTokens, Usage, View } from '../types'
+import type { Activity, DecisionMode, DocView, Palette, Run, SnapMeta, Snapshot, Tab, TaskTokens, Usage, View } from '../types'
 import * as C from './core'
 
 const PANE = 'asterbraid'
@@ -19,6 +19,61 @@ const viewA = atom({ plugin: 'asterbraid-dashboard', key: 'view' } as const, C.D
 const usageA = atom({ plugin: 'asterbraid-dashboard', key: 'usage' } as const, { costUsd: null, contextPct: null } as Usage, { shape: 'usage-1' })
 const docA = atom({ plugin: 'asterbraid-dashboard', key: 'doc' } as const, null as DocView | null, { shape: 'doc-1' })
 const DOC_LINES = 60
+
+export const PALETTES: readonly Palette[] = ['theme', 'night', 'dracula', 'nord', 'catppuccin-mocha', 'slate-dark'] as const
+export const PALETTE_LABEL: Record<Palette, string> = {
+  theme: '테마',
+  night: '밤하늘',
+  dracula: 'Dracula',
+  nord: 'Nord',
+  'catppuccin-mocha': 'Catppuccin Mocha',
+  'slate-dark': 'Slate Dark',
+}
+
+export const DECISION_MODES: readonly DecisionMode[] = ['direct', 'away', 'all'] as const
+export const isDecisionMode = (m: unknown): m is DecisionMode => typeof m === 'string' && (DECISION_MODES as readonly string[]).includes(m)
+export const DECISION_LABEL: Record<DecisionMode, string> = { direct: '직접 결정', away: '자리 비움', all: '전부 위임' }
+export const DECISION_HELP: Record<DecisionMode, string> = {
+  direct: '미리보기 승인과 사용자 결정을 직접 정한다.',
+  away: '화면·방향은 추천안으로 진행한다. 의존성·호환 깨짐·환경·데이터는 기다린다.',
+  all: '유효한 추천안이 있는 결정과 최신 미리보기 승인을 위임한다. 원래 안전 게이트는 유지한다.',
+}
+
+const CUSTOM_TONES: Record<Exclude<Palette, 'theme' | 'night'>, Record<C.Tone, string>> = {
+  dracula: { ok: '#50fa7b', warn: '#ffb86c', err: '#ff5555', accent: '#bd93f9', info: '#8be9fd', dim: '#6272a4', plain: '#f8f8f2' },
+  nord: { ok: '#a3be8c', warn: '#ebcb8b', err: '#bf616a', accent: '#88c0d0', info: '#81a1c1', dim: '#616e88', plain: '#eceff4' },
+  'catppuccin-mocha': { ok: '#a6e3a1', warn: '#f9e2af', err: '#f38ba8', accent: '#cba6f7', info: '#89b4fa', dim: '#6c7086', plain: '#cdd6f4' },
+  'slate-dark': { ok: '#4ade80', warn: '#facc15', err: '#f87171', accent: '#38bdf8', info: '#60a5fa', dim: '#64748b', plain: '#e2e8f0' },
+}
+
+export const toneColor = (p: Palette, t: C.Tone): string | undefined => {
+  if (p === 'theme' || p === 'night') return C.toneColor(p, t)
+  return CUSTOM_TONES[p][t]
+}
+
+export const toneDim = (p: Palette, t: C.Tone): boolean => {
+  if (p === 'theme' || p === 'night') return C.toneDim(p, t)
+  return false
+}
+
+export const paletteBackground = (p: Palette): string | undefined => {
+  switch (p) {
+    case 'night': return C.NIGHT_BG
+    case 'dracula': return '#282a36'
+    case 'nord': return '#2e3440'
+    case 'catppuccin-mocha': return '#1e1e2e'
+    case 'slate-dark': return '#0f172a'
+    default: return undefined
+  }
+}
+
+export const normalizeView = (v: unknown): View => {
+  const raw = C.normalizeView(v)
+  const x = (v && typeof v === 'object' ? v : {}) as Partial<View>
+  const palette = (PALETTES as readonly string[]).includes(x.palette as string) ? (x.palette as Palette) : raw.palette
+  const pendingDecisionMode = isDecisionMode(x.pendingDecisionMode) ? x.pendingDecisionMode : null
+  return { ...raw, palette, pendingDecisionMode }
+}
 
 // 모듈 변수는 리로드 때 사라진다. 다시 계산할 수 있는 것만 둔다.
 let cfg: C.Config = C.parseConfig({})
@@ -246,9 +301,11 @@ async function runSched($: EngineInterface, args: string[]): Promise<{ ok: boole
 }
 
 /** 사용자가 고른 상태 변경 하나. 읽기 전용 설정이면 거부한다. */
-async function act($: EngineInterface, a: C.Action): Promise<string> {
+async function act($: EngineInterface, a: C.Action | { kind: 'decisionMode'; mode: DecisionMode }): Promise<string> {
   if (!cfg.allowActions) return '읽기 전용 설정(allowActions=false)이다. manager에게 말하거나 CLI로 실행한다'
-  const built = C.schedArgs(a, await read($, snapA))
+  const built = a.kind === 'decisionMode'
+    ? { args: ['decision-policy', a.mode] }
+    : C.schedArgs(a, await read($, snapA))
   if ('error' in built) return built.error
   const key = built.args.join('\u0000')
   if (inflight.has(key)) return '같은 요청을 처리하는 중이다'
@@ -257,7 +314,11 @@ async function act($: EngineInterface, a: C.Action): Promise<string> {
   const now = await $.clock.now()
   const label = `sched ${built.args.slice(0, 3).join(' ')}`
   log(r.ok ? 'info' : 'error', 'mod', 'task' in a ? a.task : null, `${label}: ${r.ok ? '완료' : C.fit(r.text, 120)}`, now)
-  await update($, viewA, v => ({ ...C.normalizeView(v), lastAction: `${r.ok ? '✓' : '✗'} ${label}${r.ok ? '' : `: ${C.fit(r.text, 80)}`}` }))
+  await update($, viewA, v => ({
+    ...normalizeView(v),
+    ...(a.kind === 'decisionMode' && r.ok ? { pendingDecisionMode: null } : {}),
+    lastAction: `${r.ok ? '✓' : '✗'} ${label}${r.ok ? '' : `: ${C.fit(r.text, 80)}`}`,
+  }))
   await flush($)
   return r.ok ? `${label} 완료` : `${label} 거부: ${r.text}`
 }
@@ -303,11 +364,15 @@ async function refreshNow($: EngineInterface) {
   return r.ok ? '스냅샷을 다시 만들고 읽었다' : `스냅샷을 만들지 못했다: ${r.text}`
 }
 
-const paletteOf = (v: View) => v.palette ?? cfg.palette
+const paletteOf = (v: View): Palette => {
+  const p = v.palette ?? (cfg.palette as Palette)
+  return (PALETTES as readonly string[]).includes(p) ? (p as Palette) : 'theme'
+}
 
 async function openPane($: EngineInterface) {
-  const night = paletteOf(C.normalizeView(await read($, viewA))) === 'night'
-  return $.ui.open({ id: PANE, title: TITLE, columns: cfg.paneColumns, rows: 12, ...(night ? { backgroundColor: C.NIGHT_BG } : {}) })
+  const pal = paletteOf(normalizeView(await read($, viewA)))
+  const backgroundColor = paletteBackground(pal)
+  return $.ui.open({ id: PANE, title: TITLE, columns: cfg.paneColumns, rows: 12, ...(backgroundColor ? { backgroundColor } : {}) })
 }
 
 /** 작업의 설계·조사 문서를 Pane 안에서 읽는다(docs/asterbraid/ 안의 .md만, 링크로 밖을 가리키면 열지 않는다). 상태는 바꾸지 않는다. */
@@ -330,7 +395,7 @@ async function openDoc($: EngineInterface, task: string, rel: string) {
 }
 
 function setView($: EngineInterface, fn: (v: View) => View) {
-  return update($, viewA, v => fn(C.normalizeView(v)))
+  return update($, viewA, v => fn(normalizeView(v)))
 }
 
 export const register: Register = (on, options) => {
@@ -483,18 +548,19 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     ensureTimer($) // 그리기는 상태를 쓰지 않는다. 타이머만 켠다(이미 있으면 아무것도 안 한다)
     const els = $.ui.resolve(e)
-    const { Box, Text, Button } = els
+    const { Box, Text, Button, Select } = els
     const Input = 'Input' in els ? els.Input : null
     const [snap, meta, runs, activity, view0, usage, doc, now] = await Promise.all([
       read($, snapA), read($, metaA), read($, runsA), read($, activityA), read($, viewA), read($, usageA), read($, docA), $.clock.now(),
     ])
-    const view = C.normalizeView(view0)
+    const view = normalizeView(view0)
     // 6-1: 글자는 세 단계(제목 = section 구분선, 본문 = plain, 설명 = dim)만 쓴다. 색은 core의 표 한 곳에서 온다(4-15 밤하늘)
     const pal = paletteOf(view)
-    const toneP = (t: C.Tone) => ({ color: C.toneColor(pal, t), dimColor: C.toneDim(pal, t) })
+    const toneP = (t: C.Tone) => ({ color: toneColor(pal, t), dimColor: toneDim(pal, t) })
     const dimP = toneP('dim')
-    const plainP = pal === 'night' ? { color: C.toneColor(pal, 'plain') } : {}
-    const bg = pal === 'night' ? { backgroundColor: C.NIGHT_BG } : {}
+    const plainP = pal !== 'theme' ? { color: toneColor(pal, 'plain') } : {}
+    const backgroundColor = paletteBackground(pal)
+    const bg = backgroundColor ? { backgroundColor } : {}
     const rate = (await $.store.get(RATE_KEY).catch(() => null)) as number | null
     const curRate = typeof rate === 'number' ? rate : cfg.refreshMs / 1000
     const tok = (snap ? ((await $.store.get(`tok:${snap.project.root}`).catch(() => null)) ?? {}) : {}) as TaskTokens
@@ -558,16 +624,13 @@ export const register: Register = (on, options) => {
             <Button key="rate-down" label="−" plain onPress={() => setRate($, C.stepRate(curRate, -1)).then(say)} />
             <Button key="rate-up" label="+" plain onPress={() => setRate($, C.stepRate(curRate, 1)).then(say)} />
           </Box>
-          <Box columnGap={1}>
-            <Text {...plainP}>색</Text>
-            {C.PALETTES.map(p => (pal === p
-              ? <Button key={`palette-${p}`} label={`● ${C.PALETTE_LABEL[p]}`} variant="primary" onPress={() => setView($, v => ({ ...v, palette: p })).then(() => openPane($))} />
-              : <Button key={`palette-${p}`} label={C.PALETTE_LABEL[p]} plain onPress={() => setView($, v => ({ ...v, palette: p })).then(() => openPane($))} />))}
-          </Box>
+          <Select key="palette" label="색" value={pal}
+            options={PALETTES.map(p => ({ value: p, label: PALETTE_LABEL[p] }))}
+            onSelect={p => { if ((PALETTES as readonly string[]).includes(p)) void setView($, v => ({ ...v, palette: p as Palette })).then(() => openPane($)) }} />
           {line(C.section('사용자 차례', W))}
           <Box columnGap={1}>
             <Button key="cmd-decisions" label={`승인·결정 열기 (${userWait}건)`} variant={userWait ? 'primary' : undefined} onPress={() => setView($, v => ({ ...v, tab: 'decisions' }))} />
-            <Text {...dimP}>미리보기 승인·수정 요청과 결정은 그 탭의 버튼으로 한다</Text>
+            <Text {...dimP}>미리보기 승인·수정 요청과 결정은 그탭의 버튼으로 한다</Text>
           </Box>
           {can && line(C.section('진행', W))}
           {can && (
@@ -580,20 +643,24 @@ export const register: Register = (on, options) => {
               <Text {...dimP}>{snap.paused ? `중지됨: ${snap.paused.reason}` : '실행 중인 에이전트는 계속된다'}</Text>
             </Box>
           )}
-          {can && line(C.section('자리 비움 (밤새 맡길 때)', W))}
-          {can && (
-            <Box columnGap={1} flexWrap="wrap">
-              {snap.away ? (
-                <Button key="cmd-back" label="복귀" variant="primary" onPress={() => act($, { kind: 'back' })} />
-              ) : (
-                <Box columnGap={1}>
-                  <Button key="cmd-away" label="자리 비움" onPress={() => act($, { kind: 'away', previews: false })} />
-                  <Button key="cmd-away-previews" label="자리 비움 + 미리보기 자동 승인" onPress={() => act($, { kind: 'away', previews: true })} />
-                </Box>
-              )}
-              <Text {...dimP}>{snap.away ? '복귀하면 자리 비운 동안 정한 것을 4번 탭에서 확인한다' : '화면·방향 결정은 추천안으로 정하고 계속한다. 의존성·호환 깨짐·환경·데이터는 기다린다'}</Text>
-            </Box>
-          )}
+          {can && line(C.section('사용자 결정 위임', W))}
+          {can && (() => {
+            const current: DecisionMode = isDecisionMode(snap.decision_policy)
+              ? snap.decision_policy
+              : (snap.away ? 'away' : 'direct')
+            const draft: DecisionMode = isDecisionMode(view.pendingDecisionMode) ? view.pendingDecisionMode : current
+            return (
+              <Box flexDirection="column">
+                <Text {...plainP} wrap="wrap">{`현재: ${DECISION_LABEL[current]} · 선택: ${DECISION_LABEL[draft]}${draft === current ? ' (변경 없음)' : ' (아직 적용 안 함)'}`}</Text>
+                <Select key="decision-mode" label="결정 모드" value={draft}
+                  options={DECISION_MODES.map(mode => ({ value: mode, label: DECISION_LABEL[mode] }))}
+                  onSelect={mode => { if (isDecisionMode(mode)) void setView($, v => ({ ...v, pendingDecisionMode: mode })) }} />
+                <Text {...dimP} wrap="wrap">{DECISION_HELP[draft]}</Text>
+                {draft !== current && <Button key="decision-mode-apply" label={`적용: ${DECISION_LABEL[draft]}`} variant="primary" onPress={() => act($, { kind: 'decisionMode', mode: draft })} />}
+                <Text {...dimP} wrap="wrap">고른 뒤 적용해야 바뀐다. Claude Code 도구 권한 auto 모드와는 다르며, 일시 중지·안전 게이트·검증·통합 제한을 바꾸지 않는다.</Text>
+              </Box>
+            )
+          })()}
           {can && line(C.section('설계 검토 (큰 설계를 다른 검토자가 먼저 본다)', W))}
           {can && (
             <Box columnGap={1} flexWrap="wrap">
@@ -836,7 +903,18 @@ export const register: Register = (on, options) => {
       }
     }
 
-    const header = lines(C.headerLines(snap, meta, runs, now, warns, W, curRate * 1000, usage))
+    const currentDecisionMode: DecisionMode = isDecisionMode(snap.decision_policy)
+      ? snap.decision_policy
+      : (snap.away ? 'away' : 'direct')
+    const baseHeader = C.headerLines(snap, meta, runs, now, warns, W, curRate * 1000, usage)
+    const headerLines = currentDecisionMode === 'all' && !snap.away
+      ? [
+          ...baseHeader.slice(0, -1),
+          C.fitLine([{ text: '✦ 결정 전부 위임 중 (안전 게이트 유지)', tone: 'info', bold: true }, { text: '  → 7 명령 탭', tone: 'dim' }], W),
+          baseHeader[baseHeader.length - 1] ?? C.rule(W),
+        ]
+      : baseHeader
+    const header = lines(headerLines)
     const footer = view.lastAction ? <Text {...dimP} wrap="wrap">{view.lastAction}</Text> : null // 경로를 자르지 않는다
 
     // 넓은 자리에서는 표 위주 탭 옆에 에이전트 목록을 붙인다. 버튼이 많은 탭은 한 줄로 쓴다

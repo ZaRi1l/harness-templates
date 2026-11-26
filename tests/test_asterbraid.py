@@ -402,6 +402,68 @@ class TestAwayMode(ModsCase):
         self.assertEqual([x for x in self.snapshot()["away_log"] if x["reviewed"] is None], [])
 
 
+class TestDecisionPolicy(ModsCase):
+    def decide(self, did="D-1", kind="data", recommend="A", ask_user=False):
+        args = ["decide", "add", did, "--kind", kind, "--option", "A: recommended",
+                "--option", "B: alternative", "--why", "recorded rationale", "--evidence", "design.md"]
+        if recommend:
+            args += ["--recommend", recommend]
+        if ask_user:
+            args += ["--ask-user"]
+        return self.ok(*args)
+
+    def test_default_direct_and_legacy_away_remain_distinct(self):
+        self.assertEqual(self.snapshot()["decision_policy"], "direct")
+        self.ok("away", "--previews")
+        self.assertEqual(self.snapshot()["decision_policy"], "away")
+        self.ok("decision-policy", "direct")
+        self.assertEqual(self.snapshot()["decision_policy"], "direct")
+        self.assertIsNone(self.snapshot()["away"])
+        self.decide(kind="ux")
+        self.assertIn("자리 비움", self.refused("decide", "adopt", "D-1"))
+
+    def test_full_policy_adopts_every_kind_including_ask_user_with_provenance(self):
+        self.ok("decision-policy", "all", "--reason", "explicit user delegation")
+        for kind in ("ui", "ux", "architecture", "data", "breaking", "dependency", "requirements",
+                     "direction", "environment", "limit", "other"):
+            with self.subTest(kind=kind):
+                did = f"D-{kind}"
+                self.decide(did, kind=kind, ask_user=True)
+                d = self.ok("decide", "adopt", did)
+                self.assertEqual((d["state"], d["choice"], d["by"]), ("ANSWERED", "A", "manager"))
+                self.assertEqual(d["delegation"]["policy"], "all")
+                self.assertEqual(d["delegation"]["reason"], "explicit user delegation")
+                self.assertEqual(d["why"], "recorded rationale")
+                entry = self.snapshot()["away_log"][-1]
+                self.assertEqual((entry["key"], entry["by"], entry["policy"]), (did, "manager", "all"))
+        self.assertIsNone(self.snapshot()["away"])
+        self.assertEqual(self.ok("status", "--json")["decision_policy"], "all")
+        self.assertEqual(len(self.ok("back")["auto"]), 11)
+        self.assertEqual(self.snapshot()["decision_policy"], "direct")
+
+    def test_full_requires_recommendation_and_does_not_enable_previews(self):
+        self.ok("decision-policy", "all")
+        self.decide(recommend="")
+        self.assertIn("추천", self.refused("decide", "adopt", "D-1"))
+        self.assertIn("adopt", self.refused("decide", "answer", "D-1", "--choice", "B", "--by", "manager"))
+        self.preview_ready()
+        self.assertIn("자리 비움", self.refused("approve", "UI", "--by", "away"))
+        self.assertIn("위임", self.refused("approve", "UI", "--by", "manager"))
+        self.assertEqual(self.ok("away")["adoptable"], ["ui", "ux", "direction", "architecture", "requirements"])
+        self.assertEqual(self.snapshot()["decision_policy"], "away")
+
+    def test_full_decision_can_be_reviewed_and_reopened_after_back(self):
+        self.ok("decision-policy", "all")
+        self.decide(ask_user=True)
+        self.ok("decide", "adopt", "D-1")
+        self.ok("back")
+        self.assertEqual(self.ok("away-review", "D-1", "--redo")["reopened"], "D-1-r1")
+        self.assertIn("자리 비움", self.refused("decide", "adopt", "D-1-r1"))
+        reopened = next(d for d in self.snapshot()["decisions"] if d["id"] == "D-1-r1")
+        self.assertTrue(reopened["ask_user"])
+        self.assertNotIn("delegation", reopened)
+
+
 class TestSettingsWarning(ModsCase):
     """e2e4 N1: 하네스 settings.json 없이(Hook·push 거부 없이) 끝까지 돌았다. status가 알려야 한다."""
 
