@@ -329,6 +329,25 @@ Mod 설정은 Claude Code 설정 메뉴(또는 settings의 `pluginConfigs`)에�
 - 에이전트 관측은 세션별이다. 다른 세션이 실행 중인 작업은 "실행 미확인"으로 보인다. 복구는 manager가 `sched recover`로 판단한다.
 - linked worktree에서 열어도 공통 git 폴더의 같은 상태를 본다.
 
+## 로컬 마무리 (`finalize.py`)
+통합 브랜치(`integration`)에 검증·병합된 결과를 사용자가 로컬 대상 브랜치(예: `main`)에 fast-forward로 반영할 때 쓰는 명시적 헬퍼입니다.
+하네스 규칙에 따라 원격 push는 하지 않으며, 자동 실행되지 않고 사용자가 직접 실행합니다.
+
+```
+python .claude/hooks/finalize.py --target main           # 미리보기만 수행 (refs 변경 없음)
+python .claude/hooks/finalize.py --target main --apply   # 사용자 승인 하에 로컬 fast-forward 반영 (--yes도 가능)
+```
+
+- **안전 검증**:
+  - 기록된 통합 브랜치 확인 및 체크아웃 청결(`git status --porcelain`) 확인
+  - 모든 등록 작업이 `COMPLETED` 또는 `CANCELLED` 상태인지 확인 (진행 중·미완료·`BLOCKED` 작업이 남아 있으면 거부)
+  - 완료 작업의 독립 verifier 통과 증거 및 통합 브랜치 전체 테스트(`verify.py`) 통과 확인
+  - 대상 브랜치가 존재하고 통합 브랜치의 조상인지 확인 (갈라진 브랜치는 거부)
+  - 대상 브랜치가 다른 worktree에 체크아웃되어 있지 않은지 확인
+- **반영 방식**:
+  - `git merge --ff-only`로만 반영하며, `force`·`reset --hard`·`git push`는 수행하지 않습니다.
+  - 실행 실패 시 원래 브랜치로 자동 복구하며, 테스트 도중 커밋 SHA가 바뀌는 레이스 컨디션을 감지해 중단합니다.
+
 ## 테스트
 - 스케줄러: `python -m unittest discover -s tests -p "test_asterbraid.py"` (기존 autonomous 테스트를 이 템플릿에 다시 돌리는 회귀 + 확장 기능)
 - Mod: `claude plugin validate .claude/skills/asterbraid-dashboard`, `claude plugin test .claude/skills/asterbraid-dashboard`

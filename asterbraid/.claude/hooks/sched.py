@@ -17,6 +17,7 @@
   design-review ID --verifier V --verdict PASS|FAIL [--notes] / --skip --decision D   deep 설계 검토(FAIL → 다시 설계)
   review-mode off|deep|ask     설계 검토 설정(deep: deep 설계는 검토 PASS 뒤 구현, ask: 사용자에게 묻고 --skip 가능)
   deps ID --set A,B            구현 시작 전에 의존을 바꾼다(순환 검사, 승인·노트는 그대로)
+  paths ID --set P1,P2 --reason R   구현 시작 전에 담당 경로를 안전하게 바꾼다(진행 중 충돌 검사)
   preview ID --file F          (designer) 미리보기 버전 등록 → AWAITING_APPROVAL
   approve ID [--version N --sha S] / revise ID [--version N] --feedback "..."
                                사용자의 승인 / 수정 요청을 기록한다(버전·해시가 사용자가 본 것과 같아야 한다)
@@ -324,8 +325,8 @@ def cmd_preview(a, root, cfg):
 def cmd_approve(a, root, cfg):
     with store(root) as st:
         t = get(st, a.id)
-        if a.by == "manager":
-            raise Refused("미리보기는 manager 위임 승인을 지원하지 않는다. 사용자 승인을 기다리거나 sched away --previews를 쓴다")
+        if a.by == "manager" and decision_policy(st) != "all":
+            raise Refused("미리보기 manager 승인은 전체 결정 위임(all)이 켜졌을 때만 한다")
         if a.by == "away":  # asterbraid 추가(4-5): 사용자가 미리보기까지 위임했을 때만 추천안(최신 버전)을 승인한다
             if not st["away"]:
                 raise Refused("자리 비움 중이 아니다. by away 승인은 사용자가 자리 비움을 켰을 때만 한다")
@@ -356,8 +357,12 @@ def cmd_approve(a, root, cfg):
         t["preview"]["approval"] = {"version": n, "sha256": v["sha256"], "at": now(), "by": a.by,
                                     "criteria_sha": hashlib.sha256(t["criteria"].encode("utf-8")).hexdigest()[:16]}
         transition(t, "READY", f"미리보기 v{n} 승인({a.by})")
-        if a.by == "away":
-            log_away(st, "preview", t["id"], f"{t['title']} 미리보기 v{n} 자동 승인", version=n)
+        if a.by in ("away", "manager"):
+            policy = decision_policy(st)
+            if a.by == "manager":
+                t["preview"]["approval"]["delegation"] = {"policy": "all", **st["decision_delegation"]}
+            log_away(st, "preview", t["id"], f"{t['title']} 미리보기 v{n} 자동 승인", version=n,
+                     by=a.by, policy=policy)
         return brief(t)
 
 
@@ -537,6 +542,38 @@ def cmd_deps(a, root, cfg):
         return brief(t)
 
 
+def cmd_paths(a, root, cfg):
+    """구현 시작 전에 작업의 담당 경로를 바꾼다. 진행 중인 다른 작업과의 경로 충돌을 검사한다."""
+    reason = (a.reason or "").strip()
+    if not reason:
+        raise Refused("경로 변경 사유(--reason)가 필요하다")
+    new_paths = validate_paths(a.set)
+    with store(root) as st:
+        t = get(st, a.id)
+        ok, why = can_edit_paths(t)
+        if not ok:
+            raise Refused(why)
+        conflict = path_conflict(st, dict(t, paths=new_paths))
+        if conflict:
+            raise Refused(conflict)
+        old_paths = t["paths"]
+        t["paths"] = new_paths
+        t["updated"] = now()
+        t["history"].append({
+            "at": now(),
+            "from": t["state"],
+            "to": t["state"],
+            "action": "paths",
+            "old_paths": old_paths,
+            "paths": new_paths,
+            "reason": reason,
+        })
+        if "notes_log" in st:
+            text = f"담당 경로 변경 {old_paths} → {new_paths}: {reason}"
+            st["notes_log"] = (st["notes_log"] + [{"at": now(), "kind": "split", "text": text, "task": t["id"]}])[-NOTES_KEPT:]
+        return brief(t)
+
+
 def cmd_sync(a, root, cfg):
     wt = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
     if verify.same_path(wt, root):
@@ -585,11 +622,14 @@ def cmd_status(a, root, cfg):
             print(f"지금 시작할 수 있는 구현 작업: {out['ready_now']}")
         if st["paused"]:
             print(f"새 배정 일시 중지: {st['paused'].get('reason') or '사유 없음'} (sched resume)")
-        if st["away"]:
+        pol = decision_policy(st)
+        if pol == "all":
+            print("결정 전부 위임 중: 추천안이 있는 모든 결정은 decide adopt, 최신 미리보기는 approve --by manager로 승인")
+        elif st["away"]:
             print(f"사용자 자리 비움 중(미리보기 자동 승인 {'예' if st['away'].get('previews') else '아니오'}): "
                   f"{', '.join(ADOPTABLE_KINDS)} 결정은 decide adopt로 추천안 채택")
         if open_dec:
-            print(f"사용자 결정 대기: {open_dec}")
+            print(f"사용자 결정 대기: {open_dec}" if pol != "all" else f"결정 대기(전부 위임 중): {open_dec}")
         for w in warn:
             print(f"경고: {w['text']}. 원인을 확인한다(에이전트 상태, 같은 오류 반복, 환경)")
         for w in out["warnings"]:
@@ -995,6 +1035,7 @@ def main() -> int:
     cmd("unblock", cmd_unblock, ID, REASON, (("--reset-retries",), {"action": "store_true"}))
     cmd("cancel", cmd_cancel, ID, REASON, (("--force",), {"action": "store_true"}))
     cmd("deps", cmd_deps, ID, (("--set",), {"required": True}), REASON)
+    cmd("paths", cmd_paths, ID, (("--set",), {"required": True}), (("--reason",), {"required": True}))
     cmd("sync", cmd_sync, ID)
     cmd("status", cmd_status, (("--json",), {"action": "store_true"}), (("--brief",), {"action": "store_true"}))
     cmd("recover", cmd_recover, (("--reset-running",), {"action": "store_true"}))

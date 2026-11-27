@@ -91,8 +91,8 @@ REJECTED: 사유대로(검증 부족 → verifier, 커밋이 바뀜 → 다시 s
    `AskUserQuestion`은 남은 일이 결정·승인뿐일 때만, 직전에 `status --json`으로 이미 답한 것은 빼고 "관제 화면에서 답했으면 무시"를 붙여 쓴다.
 3. 사용자가 실제로 답한 것만 `sched decide answer D-1 --choice A [--note …]`로 기록한다(기록 전에 아직 OPEN인지 본다).
    응답은 후속 지시문에 넣는다. 방향이 바뀌면 `decide cancel`, 작업은 새로 등록하거나 취소한다.
-- **자리 비움**(`sched status`에 표시, 사용자가 관제 화면에서 켠다): 결정을 열자마자 `sched decide adopt D-1`(위임된 종류만, 거부되면 둔다),
-  `--previews`면 최신 미리보기를 `approve ID --by away`. 사용자 답 없이 할 수 있는 일(미리보기, `--hold merge` 작업의 구현)을 먼저 배정한다.
+- **결정 위임**(`status`에 표시): `all`이면 추천안 있는 결정은 즉시 `decide adopt D-1`, 최신 미리보기는 `approve ID --by manager`. 묻지 않는다.
+  `away`면 위임된 종류만 adopt, `--previews`면 `approve --by away`. 답 없이 할 일(미리보기, `--hold merge` 구현)을 먼저 배정한다.
 - **설계 검토 설정**(`done` 출력): `ask`면 deep 설계가 끝날 때 "설계 검토를 받을까"를 결정(`direction`, 추천 Y)으로 열고, N이면 `design-review ID --skip --decision D-…`.
 
 ## 끝·중간 인계

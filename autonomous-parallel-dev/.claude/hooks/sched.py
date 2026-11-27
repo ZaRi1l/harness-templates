@@ -16,6 +16,7 @@
   submit ID                    (작업 worktree에서) 구현 제출 → VERIFYING. 담당 경로 밖 변경을 거부한다
   evidence ID --verifier V --verdict PASS|FAIL --sha SHA   독립 검증 증거 기록
   fail / block / unblock / cancel ID                        재작업·보류·해제·취소
+  paths ID --set P1,P2 --reason R   구현 시작 전에 담당 경로를 안전하게 바꾼다(진행 중 충돌 검사)
   sync ID                      (작업 worktree에서) 통합 브랜치와 이전 작업 브랜치를 병합해 온다
   status [--json] / metrics    현황 / 소요 시간·실패율 등
   recover [--reset-running]    저장된 상태를 실제 Git 상태와 대조해 고친다(세션 재시작 때)
@@ -32,6 +33,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -219,6 +221,66 @@ def norm(path: str) -> str:
     return "" if path == "." else path
 
 
+def validate_path(raw: str) -> str:
+    if not isinstance(raw, str):
+        raise Refused("경로는 문자열이어야 한다")
+    s = raw.strip().strip("`'\"")
+    if not s:
+        raise Refused("경로가 비어 있다")
+    if any(c in s for c in "*?["):
+        raise Refused(f"와일드카드·glob 패턴은 지원하지 않는다. 리터럴 파일 또는 폴더 경로만 지정한다: {raw}")
+    if s.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", s) or s.startswith(("//", "\\\\")):
+        raise Refused(f"절대 경로는 허용되지 않는다(저장소 루트 기준 상대 경로만): {raw}")
+    n = s.replace("\\", "/")
+    if "//" in n:
+        raise Refused(f"경로에 '//'가 포함되어 있다: {raw}")
+    while n.startswith("./"):
+        n = n[2:]
+    n = n.rstrip("/")
+    if not n or n == ".":
+        raise Refused(f"경로가 유효하지 않다: {raw}")
+    segments = n.split("/")
+    for seg in segments:
+        if seg == "..":
+            raise Refused(f"상위 경로('..') 탐색은 허용되지 않는다: {raw}")
+        if seg == ".":
+            raise Refused(f"경로에 불필요한 '.' 세그먼트가 포함되어 있다: {raw}")
+        if not seg:
+            raise Refused(f"경로에 빈 세그먼트가 포함되어 있다: {raw}")
+    return n
+
+
+def validate_paths(paths: list | str) -> list[str]:
+    if isinstance(paths, str):
+        raw_list = paths.split(",")
+    elif isinstance(paths, list):
+        raw_list = paths
+    else:
+        raise Refused("담당 경로는 문자열 또는 목록이어야 한다")
+    if not raw_list:
+        raise Refused("담당 경로가 비어 있다")
+    out = []
+    seen = set()
+    for item in raw_list:
+        p = validate_path(item)
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    if not out:
+        raise Refused("담당 경로가 비어 있다")
+    return out
+
+
+def can_edit_paths(t: dict) -> tuple[bool, str]:
+    if t["state"] not in ("PENDING", "READY", "RETRY", "BLOCKED"):
+        return False, f"{t['id']}는 {t['state']} 상태라 담당 경로를 바꿀 수 없다(구현 시작 전 상태에서만 허용)"
+    if (t.get("branch") or t.get("head") or t.get("worktree") or t.get("old_branches")
+            or any(h.get("to") in ("IMPLEMENTING", "VERIFYING", "READY_TO_MERGE", "MERGING", "COMPLETED")
+                   for h in t.get("history", []))):
+        return False, f"{t['id']}는 이미 구현이 시작되었거나 브랜치/작업트리가 있어 담당 경로를 바꿀 수 없다"
+    return True, ""
+
+
 def overlaps(a: str, b: str) -> bool:
     return not a or not b or a == b or a.startswith(b + "/") or b.startswith(a + "/")
 
@@ -334,7 +396,7 @@ def new_task(cfg: dict, spec: dict) -> dict:
             "fast" if risk == "low" else "standard"
     if profile not in cfg["profiles"]:
         raise Refused(f"모르는 프로파일: {profile}")
-    paths = [norm(p) for p in spec["paths"]]
+    paths = validate_paths(spec["paths"])
     t = {"id": str(spec["id"]), "title": spec["title"], "criteria": spec["criteria"], "paths": paths,
          "forbid": [norm(p) for p in spec.get("forbid", [])], "deps": [str(d) for d in spec.get("deps", [])],
          "priority": int(spec.get("priority", 0)), "risk": risk, "profile": profile, "state": "PENDING",
@@ -703,6 +765,35 @@ def cmd_cancel(a, root, cfg):
         return brief(t)
 
 
+def cmd_paths(a, root, cfg):
+    """구현 시작 전에 작업의 담당 경로를 바꾼다. 진행 중인 다른 작업과의 경로 충돌을 검사한다."""
+    reason = (a.reason or "").strip()
+    if not reason:
+        raise Refused("경로 변경 사유(--reason)가 필요하다")
+    new_paths = validate_paths(a.set)
+    with store(root) as st:
+        t = get(st, a.id)
+        ok, why = can_edit_paths(t)
+        if not ok:
+            raise Refused(why)
+        conflict = path_conflict(st, dict(t, paths=new_paths))
+        if conflict:
+            raise Refused(conflict)
+        old_paths = t["paths"]
+        t["paths"] = new_paths
+        t["updated"] = now()
+        t["history"].append({
+            "at": now(),
+            "from": t["state"],
+            "to": t["state"],
+            "action": "paths",
+            "old_paths": old_paths,
+            "paths": new_paths,
+            "reason": reason,
+        })
+        return brief(t)
+
+
 def cmd_sync(a, root, cfg):
     wt = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
     if verify.same_path(wt, root):
@@ -933,6 +1024,7 @@ def main() -> int:
     cmd("block", cmd_block, ID, (("--reason",), {"required": True}))
     cmd("unblock", cmd_unblock, ID, REASON, (("--reset-retries",), {"action": "store_true"}))
     cmd("cancel", cmd_cancel, ID, REASON)
+    cmd("paths", cmd_paths, ID, (("--set",), {"required": True}), (("--reason",), {"required": True}))
     cmd("sync", cmd_sync, ID)
     cmd("status", cmd_status, (("--json",), {"action": "store_true"}), (("--brief",), {"action": "store_true"}))
     cmd("recover", cmd_recover, (("--reset-running",), {"action": "store_true"}))

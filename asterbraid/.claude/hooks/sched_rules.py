@@ -73,6 +73,66 @@ def norm(path: str) -> str:
     return "" if path == "." else path
 
 
+def validate_path(raw: str) -> str:
+    if not isinstance(raw, str):
+        raise Refused("경로는 문자열이어야 한다")
+    s = raw.strip().strip("`'\"")
+    if not s:
+        raise Refused("경로가 비어 있다")
+    if any(c in s for c in "*?["):
+        raise Refused(f"와일드카드·glob 패턴은 지원하지 않는다. 리터럴 파일 또는 폴더 경로만 지정한다: {raw}")
+    if s.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", s) or s.startswith(("//", "\\\\")):
+        raise Refused(f"절대 경로는 허용되지 않는다(저장소 루트 기준 상대 경로만): {raw}")
+    n = s.replace("\\", "/")
+    if "//" in n:
+        raise Refused(f"경로에 '//'가 포함되어 있다: {raw}")
+    while n.startswith("./"):
+        n = n[2:]
+    n = n.rstrip("/")
+    if not n or n == ".":
+        raise Refused(f"경로가 유효하지 않다: {raw}")
+    segments = n.split("/")
+    for seg in segments:
+        if seg == "..":
+            raise Refused(f"상위 경로('..') 탐색은 허용되지 않는다: {raw}")
+        if seg == ".":
+            raise Refused(f"경로에 불필요한 '.' 세그먼트가 포함되어 있다: {raw}")
+        if not seg:
+            raise Refused(f"경로에 빈 세그먼트가 포함되어 있다: {raw}")
+    return n
+
+
+def validate_paths(paths: list | str) -> list[str]:
+    if isinstance(paths, str):
+        raw_list = paths.split(",")
+    elif isinstance(paths, list):
+        raw_list = paths
+    else:
+        raise Refused("담당 경로는 문자열 또는 목록이어야 한다")
+    if not raw_list:
+        raise Refused("담당 경로가 비어 있다")
+    out = []
+    seen = set()
+    for item in raw_list:
+        p = validate_path(item)
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    if not out:
+        raise Refused("담당 경로가 비어 있다")
+    return out
+
+
+def can_edit_paths(t: dict) -> tuple[bool, str]:
+    if t["state"] not in ("PENDING", "READY", "RETRY", "BLOCKED"):
+        return False, f"{t['id']}는 {t['state']} 상태라 담당 경로를 바꿀 수 없다(구현 시작 전 상태에서만 허용)"
+    if (t.get("branch") or t.get("head") or t.get("worktree") or t.get("old_branches")
+            or any(h.get("to") in ("IMPLEMENTING", "VERIFYING", "READY_TO_MERGE", "MERGING", "COMPLETED")
+                   for h in t.get("history", []))):
+        return False, f"{t['id']}는 이미 구현이 시작되었거나 브랜치/작업트리가 있어 담당 경로를 바꿀 수 없다"
+    return True, ""
+
+
 def overlaps(a: str, b: str) -> bool:
     return not a or not b or a == b or a.startswith(b + "/") or b.startswith(a + "/")
 
@@ -223,7 +283,7 @@ def new_task(cfg: dict, spec: dict) -> dict:
         depth = "deep" if profile == "deep" else "standard"
     if depth is not None and depth not in DESIGN_DEPTHS:
         raise Refused(f"설계 깊이는 {DESIGN_DEPTHS} 중 하나다: {depth}")
-    paths = [norm(p) for p in spec["paths"]]
+    paths = validate_paths(spec["paths"])
     t = {"id": str(spec["id"]), "title": spec["title"], "criteria": spec["criteria"], "paths": paths,
          "forbid": [norm(p) for p in spec.get("forbid", [])], "deps": [str(d) for d in spec.get("deps", [])],
          "priority": int(spec.get("priority", 0)), "risk": risk, "profile": profile, "state": "PENDING",

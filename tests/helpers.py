@@ -81,6 +81,24 @@ class Repo:
         path = Path(self.git("rev-parse", "--path-format=absolute", "--git-path", "claude-task-locks.json"))
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
+    def assertStatus(self, proc: subprocess.CompletedProcess, status: str, code: int, cwd: Path | None = None) -> dict:
+        report = self.report(cwd)
+        assert (report["status"], proc.returncode) == (status, code), stderr(proc)
+        return report
+
+    @classmethod
+    def init_unborn(cls, base: Path, template: str, configure_user: bool = True) -> Repo:
+        repo = cls.__new__(cls)
+        repo.path = base / "한글 폴더"
+        repo.path.mkdir()
+        repo.git("init", "-q", "-b", "main")
+        if configure_user:
+            repo.git("config", "user.email", "test@example.com")
+            repo.git("config", "user.name", "test")
+        repo.git("config", "core.autocrlf", "false")
+        shutil.copytree(ROOT / template / ".claude", repo.path / ".claude")
+        return repo
+
 
 def rmtree(path: Path) -> None:
     """git이 만든 읽기 전용 파일도 지운다(Windows). Python 3.8에는 ignore_cleanup_errors가 없다."""

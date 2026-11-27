@@ -1,4 +1,4 @@
-from helpers import BAD, GOOD, RepoTestCase, stderr
+from helpers import BAD, GOOD, Repo, RepoTestCase, SAMPLE_TEST, stderr
 
 
 class TestVerify(RepoTestCase):
@@ -73,6 +73,68 @@ class TestVerify(RepoTestCase):
         proc = self.repo.run("verify.py", args=("--target", str(outside)))
         self.assertEqual(proc.returncode, 2)
         self.assertIn("BLOCKED", stderr(proc))
+
+    def test_unborn_repository_without_changes_skips(self):
+        empty_tmp = self.tmp / "unborn-clean"
+        empty_tmp.mkdir()
+        unborn_repo = Repo.init_unborn(empty_tmp, self.template)
+        proc = unborn_repo.hook("verify.py", "Stop")
+        r = unborn_repo.assertStatus(proc, "SKIP", 0)
+        self.assertIsNone(r["scope"])
+        self.assertIsNone(r["commit"])
+        self.assertEqual(r["branch"], "main")
+        self.assertNotIn("Traceback", stderr(proc))
+
+    def test_unborn_repository_with_passing_changes(self):
+        empty_tmp = self.tmp / "unborn-pass"
+        empty_tmp.mkdir()
+        unborn_repo = Repo.init_unborn(empty_tmp, self.template)
+        unborn_repo.write("src/m.py", GOOD)
+        unborn_repo.write("tests/__init__.py", "")
+        unborn_repo.write("tests/test_m.py", SAMPLE_TEST)
+        proc = unborn_repo.hook("verify.py", "Stop")
+        r = unborn_repo.assertStatus(proc, "PASS", 0)
+        self.assertIsNone(r["commit"])
+        self.assertEqual(r["branch"], "main")
+        self.assertIn("src/m.py", r["uncommitted_changes"])
+        self.assertEqual(r["committed_changes"], [])
+        self.assertNotIn("Traceback", stderr(proc))
+
+    def test_unborn_repository_with_failing_changes_respects_loop_guard(self):
+        empty_tmp = self.tmp / "unborn-fail"
+        empty_tmp.mkdir()
+        unborn_repo = Repo.init_unborn(empty_tmp, self.template)
+        unborn_repo.write("src/m.py", BAD)
+        unborn_repo.write("tests/__init__.py", "")
+        unborn_repo.write("tests/test_m.py", SAMPLE_TEST)
+        proc = unborn_repo.hook("verify.py", "Stop", stop_hook_active=True)
+        r = unborn_repo.assertStatus(proc, "FAIL", 1)
+        self.assertTrue(r["loop_guard_applied"])
+        self.assertNotIn("verify.py internal error", stderr(proc))
+        self.assertNotIn("verify.py internal error", r["reason"])
+
+    def test_unborn_repository_without_git_identity_runs_tests(self):
+        empty_tmp = self.tmp / "unborn-noid"
+        empty_tmp.mkdir()
+        unborn_repo = Repo.init_unborn(empty_tmp, self.template, configure_user=False)
+        unborn_repo.write("src/m.py", GOOD)
+        unborn_repo.write("tests/__init__.py", "")
+        unborn_repo.write("tests/test_m.py", SAMPLE_TEST)
+        proc = unborn_repo.hook("verify.py", "Stop")
+        r = unborn_repo.assertStatus(proc, "PASS", 0)
+        self.assertEqual(r["status"], "PASS")
+        self.assertNotIn("Traceback", stderr(proc))
+
+    def test_invalid_head_is_actionably_blocked(self):
+        (self.repo.path / ".git/HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        ref = self.repo.path / ".git/refs/heads/main"
+        ref.write_text("0" * 40 + "\n", encoding="utf-8")
+        proc = self.repo.hook("verify.py", "Stop")
+        r = self.assertStatus(proc, "BLOCKED", 2)
+        self.assertIn("git", r["reason"].lower())
+        self.assertNotIn("internal error", r["reason"])
+        self.assertNotIn("initial commit", r["reason"].lower())
+        self.assertNotIn("Traceback", stderr(proc))
 
     def commit(self, text: str, message: str) -> None:
         self.repo.write("src/m.py", text)

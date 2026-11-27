@@ -441,14 +441,21 @@ class TestDecisionPolicy(ModsCase):
         self.assertEqual(len(self.ok("back")["auto"]), 11)
         self.assertEqual(self.snapshot()["decision_policy"], "direct")
 
-    def test_full_requires_recommendation_and_does_not_enable_previews(self):
+    def test_full_requires_recommendation_and_delegates_previews(self):
         self.ok("decision-policy", "all")
         self.decide(recommend="")
         self.assertIn("추천", self.refused("decide", "adopt", "D-1"))
         self.assertIn("adopt", self.refused("decide", "answer", "D-1", "--choice", "B", "--by", "manager"))
         self.preview_ready()
         self.assertIn("자리 비움", self.refused("approve", "UI", "--by", "away"))
-        self.assertIn("위임", self.refused("approve", "UI", "--by", "manager"))
+        self.assertEqual(self.ok("approve", "UI", "--by", "manager")["state"], "READY")
+        approval = self.state("UI")["preview"]["approval"]
+        self.assertEqual(approval["by"], "manager")
+        self.assertEqual(approval["delegation"]["policy"], "all")
+        self.assertEqual(self.snapshot()["away_log"][-1]["policy"], "all")
+        self.ok("decision-policy", "direct")
+        self.preview_ready("UI2")
+        self.assertIn("위임", self.refused("approve", "UI2", "--by", "manager"))
         self.assertEqual(self.ok("away")["adoptable"], ["ui", "ux", "direction", "architecture", "requirements"])
         self.assertEqual(self.snapshot()["decision_policy"], "away")
 

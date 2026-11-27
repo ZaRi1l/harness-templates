@@ -249,6 +249,19 @@ def uncommitted_changes(root: Path) -> list[tuple[str, str]]:
     return entries
 
 
+def resolve_head(root: Path) -> str | None:
+    commit = git(root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}", check=False).strip()
+    return commit if commit else None
+
+
+def resolve_branch(root: Path) -> str:
+    ref = git(root, "symbolic-ref", "-q", "--short", "HEAD", check=False).strip()
+    if ref:
+        return ref
+    abbrev = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip()
+    return abbrev or "HEAD"
+
+
 def changed_paths(root: Path, rev_range: str) -> list[str]:
     """Relevant paths changed in rev_range. -z keeps non-ASCII paths unquoted; --no-renames lists both
     sides of a rename so a file moved out of a relevant path is still seen."""
@@ -256,7 +269,9 @@ def changed_paths(root: Path, rev_range: str) -> list[str]:
     return [p for p in out.split("\0") if p and is_relevant(p)]
 
 
-def committed_changes(root: Path, last_pass_head: str | None = None) -> tuple[str | None, list[str]]:
+def committed_changes(root: Path, last_pass_head: str | None = None, head: str | None = None) -> tuple[str | None, list[str]]:
+    if not head:
+        return None, []
     base, changed = None, []
     for ref in filter(None, [os.environ.get("VERIFY_BASE_REF"), *CFG["base_refs"]]):
         if git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False).strip():
@@ -267,15 +282,15 @@ def committed_changes(root: Path, last_pass_head: str | None = None) -> tuple[st
             base = None
     # Work committed on the base branch itself (merge-base == HEAD) is invisible above: also count
     # everything committed since the last full PASS. A vanished commit (rebase, gc) is ignored.
-    if last_pass_head and last_pass_head != git(root, "rev-parse", "HEAD").strip():
+    if last_pass_head and last_pass_head != head:
         if git(root, "rev-parse", "--verify", "--quiet", f"{last_pass_head}^{{commit}}", check=False).strip():
             changed += [p for p in changed_paths(root, f"{last_pass_head}..HEAD") if p not in changed]
     return base, changed
 
 
-def fingerprint(root: Path, head: str, dirty: list[tuple[str, str]], python: str) -> str:
+def fingerprint(root: Path, head: str | None, dirty: list[tuple[str, str]], python: str) -> str:
     h = hashlib.sha256()
-    h.update(f"{head}\0{python}\0".encode())
+    h.update(f"{head or ''}\0{python}\0".encode())
     h.update(Path(__file__).read_bytes())  # editing this hook or its config invalidates cached results
     h.update(CONFIG_PATH.read_bytes())
     for status, path in sorted(dirty, key=lambda e: e[1]):
@@ -400,27 +415,30 @@ def main() -> int:
     except (OSError, ValueError) as e:
         return finish("BLOCKED", fail_code, f"verify config {CONFIG_PATH} is missing or invalid: {e}")
 
-    git_dir = git(root, "rev-parse", "--absolute-git-dir").strip()
-    common_dir = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
-    linked = not same_path(git_dir, common_dir)
-    head = git(root, "rev-parse", "HEAD").strip()
-    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
-    REPORT.update(worktree=str(root), linked_worktree=linked, main_checkout=str(common_dir.parent),
-                  branch=branch, commit=head)
-    log(f"event={REPORT['event']} agent={REPORT['agent_type'] or '-'} target={root} ({source}) "
-        f"branch={branch} head={head[:10]} {'linked-worktree' if linked else 'main-checkout'}")
-    if REPORT["agent_type"] == "implementer" and not linked:
-        msg = "implementer result is not in a linked worktree; isolation may not have been applied"
-        REPORT["warnings"].append(msg)
-        log(f"WARNING: {msg}")
+    try:
+        git_dir = git(root, "rev-parse", "--absolute-git-dir").strip()
+        common_dir = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+        linked = not same_path(git_dir, common_dir)
+        head = resolve_head(root)
+        branch = resolve_branch(root)
+        REPORT.update(worktree=str(root), linked_worktree=linked, main_checkout=str(common_dir.parent),
+                      branch=branch, commit=head)
+        log(f"event={REPORT['event']} agent={REPORT['agent_type'] or '-'} target={root} ({source}) "
+            f"branch={branch} head={head[:10] if head else '(unborn)'} {'linked-worktree' if linked else 'main-checkout'}")
+        if REPORT["agent_type"] == "implementer" and not linked:
+            msg = "implementer result is not in a linked worktree; isolation may not have been applied"
+            REPORT["warnings"].append(msg)
+            log(f"WARNING: {msg}")
 
-    state = load_state()
-    dirty = uncommitted_changes(root)
-    base, committed = committed_changes(root, state.get("last_pass_head"))
-    python = pick_python(common_dir.parent)
-    fp = fingerprint(root, head, dirty, python)
-    REPORT.update(base_commit=base, uncommitted_changes=[p for _, p in dirty],
-                  committed_changes=committed, python=python, fingerprint=fp)
+        state = load_state()
+        dirty = uncommitted_changes(root)
+        base, committed = committed_changes(root, state.get("last_pass_head"), head)
+        python = pick_python(common_dir.parent)
+        fp = fingerprint(root, head, dirty, python)
+        REPORT.update(base_commit=base, uncommitted_changes=[p for _, p in dirty],
+                      committed_changes=committed, python=python, fingerprint=fp)
+    except (RuntimeError, OSError) as e:
+        return finish("BLOCKED", fail_code, f"git command failed: {e}")
 
     if not args.only and not args.force:
         if not dirty and not committed:
@@ -487,8 +505,9 @@ def main() -> int:
     pattern = CFG["success_pattern"]
     pattern_ok = not pattern or re.search(pattern, output, re.M) is not None
     if proc.returncode == 0 and pattern_ok:
+        head_tag = f"head {head[:10]}" if head else "unborn HEAD"
         if not args.only:
-            save_state("PASS", fp, f"{scope}, {elapsed}, head {head[:10]}", head)
+            save_state("PASS", fp, f"{scope}, {elapsed}, {head_tag}", head)
         return finish("PASS", 0, f"{scope} in {elapsed}; exit 0\n{report}")
 
     detail = f"{scope} in {elapsed}, exit {proc.returncode}, target {root} (branch {branch})\n{report}\nFull log: {PATHS['log']}"
